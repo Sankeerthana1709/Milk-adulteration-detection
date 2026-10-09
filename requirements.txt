@@ -1,0 +1,16 @@
+# Core Data & ML
+numpy>=2.0.0
+pandas>=2.2.0
+scikit-learn>=1.5.0
+xgboost>=2.0.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+joblib>=1.4.0
+
+# Backend Web Server & REST API
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# IoT & Microcontroller Hardware Bridge
+pyserial>=3.5
+requests>=2.31.0
