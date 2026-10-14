@@ -1,795 +1,599 @@
-/**
- * MilkShield AI - Clinical Dairy Laboratory Client Application
- * Handles normal direct inputs, dynamic zone indicator ribbons, SVG dial animations,
- * SQLite sample history viewing & forensic inspection, presets, and live ESP32 telemetry.
+/* MilkGuard AI · client app
+ * Talks to the REST API described in the spec. If the backend is unreachable
+ * (e.g. opening index.html straight from disk) a local rule-based engine backed
+ * by localStorage answers the same routes, so the UI is fully usable offline.
  */
+(() => {
+'use strict';
 
-document.addEventListener('DOMContentLoaded', () => {
-    // =========================================================================
-    // DOM ELEMENTS
-    // =========================================================================
+/* ======================= helpers ======================= */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const fmt = (n, d = 1) => (Number.isFinite(+n) ? (+n).toFixed(d) : '–');
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+const API_BASE = '';
+const PURE = { temperature: 36.5, ph: 6.70, color: 255, fat: 1, turbidity: 1 };
 
-    // Navigation
-    const tabButtons = document.querySelectorAll('.tab-btn, .nav-tab-btn');
-    const tabViews = document.querySelectorAll('.tab-view');
-    const btnQuickHistory = document.getElementById('btn-quick-history');
-    const btnEmptyGotoBench = document.getElementById('btn-empty-goto-bench');
-    const headerSampleCount = document.getElementById('header-sample-count');
-    const tabHistoryCount = document.getElementById('tab-history-count');
+const SOURCE_LABEL = { lab: 'Interactive Lab Test', iot: 'ESP32 IoT Node', preset: 'Preset Scenario' };
+const SOURCE_CLASS = { lab: 'lab', iot: 'iot', preset: 'preset' };
+const normSource = (s) => {
+  const t = String(s || '').toLowerCase();
+  if (t.includes('esp') || t.includes('iot')) return 'iot';
+  if (t.includes('preset')) return 'preset';
+  return 'lab';
+};
 
-    // Normal Input Fields
-    const inputSampleName = document.getElementById('input-sample-name');
-    const btnGenerateName = document.getElementById('btn-generate-name');
-    const inputSampleNotes = document.getElementById('input-sample-notes');
+const PRESETS = [
+  { id: 'standard', emoji: '🥛', cls: 'pure',   tag: 'Pure',
+    name: 'Standard Whole Milk (Intact Solids)',
+    desc: 'Fresh, chilled whole milk with intact fat globules and solids-not-fat. Reference baseline.',
+    values: { temperature: 38.0, fat: 1, turbidity: 1, color: 255, ph: 6.80 } },
+  { id: 'buffer', emoji: '⚗️', cls: 'mild',   tag: 'Mild Buffer',
+    name: 'Mild Alkaline Buffer (Urea / Sodium Bicarbonate)',
+    desc: 'Buffers added to mask souring and extend shelf life. Slightly elevated pH, otherwise looks normal.',
+    values: { temperature: 40.0, fat: 1, turbidity: 1, color: 250, ph: 7.40 } },
+  { id: 'detergent', emoji: '🧴', cls: 'severe', tag: 'Severe',
+    name: 'Severe Detergent / Caustic Soda Adulteration',
+    desc: 'Detergent emulsifier or caustic soda creating artificial foam and body. Strongly alkaline.',
+    values: { temperature: 42.0, fat: 0, turbidity: 0, color: 246, ph: 8.60 } },
+  { id: 'soured', emoji: '🦠', cls: 'severe', tag: 'Severe',
+    name: 'Soured / Curdled Spoiled Milk',
+    desc: 'Lactic acid fermentation from bacterial growth in warm storage. Strongly acidic.',
+    values: { temperature: 48.0, fat: 1, turbidity: 0, color: 248, ph: 4.60 } },
+  { id: 'water', emoji: '💧', cls: 'severe', tag: 'Severe',
+    name: 'Heavy Water Dilution Adulteration',
+    desc: 'Bulk dilution with water: fat and solids depleted, whiteness reduced, pH drifts low.',
+    values: { temperature: 36.0, fat: 0, turbidity: 0, color: 240, ph: 6.20 } },
+];
 
-    const inputTemp = document.getElementById('input-temp');
-    const inputPh = document.getElementById('input-ph');
-    const inputColor = document.getElementById('input-color');
-    const selectFat = document.getElementById('select-fat');
-    const selectTurb = document.getElementById('select-turb');
+/* ======================= local engine (offline fallback) ======================= */
+const LS_HISTORY = 'milkguard.history.v1';
+const LS_STREAM  = 'milkguard.stream.v1';
+const LS_SEQ     = 'milkguard.seq.v1';
+const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } };
 
-    const badgeTempZone = document.getElementById('badge-temp-zone');
-    const badgePhZone = document.getElementById('badge-ph-zone');
-    const tempRibbonMarker = document.getElementById('temp-ribbon-marker');
-    const phRibbonMarker = document.getElementById('ph-ribbon-marker');
-    const colorDotIndicator = document.getElementById('color-dot-indicator');
-    const guideTemp = document.getElementById('guide-temp');
-    const guidePh = document.getElementById('guide-ph');
+function classifyLocal(v) {
+  const t = +v.temperature, ph = +v.ph, c = +v.color, fat = +v.fat, turb = +v.turbidity;
+  const warnings = [];
+  let risk = 0;
 
-    const btnResetBench = document.getElementById('btn-reset-bench');
-    const btnSaveTest = document.getElementById('btn-save-test');
+  if (ph > 6.8) { risk += Math.min(60, (ph - 6.8) * 50); warnings.push(`pH ${fmt(ph,2)} is above the normal 6.50–6.80 range (alkaline).`); }
+  else if (ph < 6.5) { risk += Math.min(60, (6.5 - ph) * 30); warnings.push(`pH ${fmt(ph,2)} is below the normal 6.50–6.80 range (acidic).`); }
+  if (fat === 0)  { risk += 15; warnings.push('Fat globules depleted / absent.'); }
+  if (turb === 0) { risk += 15; warnings.push('Low turbidity: solids-not-fat depleted.'); }
+  if (t < 35 || t > 38) { risk += Math.min(15, (t > 38 ? t - 38 : 35 - t) * 3); warnings.push(`Temperature ${fmt(t)} °C is outside 35.0–38.0 °C.`); }
+  if (c < 255) { risk += Math.min(18, (255 - c) * 1.2); if (c < 247) warnings.push(`Colour whiteness ${c} is below the normal band.`); }
 
-    // Diagnostic Results & Speedometer
-    const gaugeScoreValue = document.getElementById('gauge-score-value');
-    const gaugeArcFill = document.getElementById('gauge-arc-fill');
-    const gaugeNeedleGroup = document.getElementById('gauge-needle-group');
-    const verdictBanner = document.getElementById('verdict-banner');
-    const verdictIcon = document.getElementById('verdict-icon');
-    const verdictTitle = document.getElementById('verdict-title');
-    const verdictDesc = document.getElementById('verdict-desc');
-    const probMediumVal = document.getElementById('prob-medium-val');
-    const probMediumBar = document.getElementById('prob-medium-bar');
-    const probLowVal = document.getElementById('prob-low-val');
-    const probLowBar = document.getElementById('prob-low-bar');
-    const adulterantVerdictBadge = document.getElementById('adulterant-verdict-badge');
-    const diagnosisChecklist = document.getElementById('diagnosis-checklist');
+  let adulterant = 'None - Pure Milk';
+  if (ph >= 8.0) adulterant = 'Detergent / Soda Neutralizer';
+  else if (ph <= 5.5 || (ph < 6.2 && turb === 0 && fat === 1)) adulterant = 'Bacterial Souring / Lactic Acid';
+  else if (fat === 0 && turb === 0 && ph < 7.0) adulterant = 'Water Dilution';
+  else if (ph >= 7.0) adulterant = 'Alkaline Buffer (Urea / Sodium Bicarbonate)';
+  else if (risk >= 50) adulterant = 'Multiple Parameter Deviation';
+  else if (risk >= 15) adulterant = 'Minor Deviation (Non-adulterant)';
 
-    // History View
-    const kpiTotalTested = document.getElementById('kpi-total-tested');
-    const kpiMediumCount = document.getElementById('kpi-medium-count');
-    const kpiLowCount = document.getElementById('kpi-low-count');
-    const kpiAdulterationRate = document.getElementById('kpi-adulteration-rate');
-    const kpiAvgMetrics = document.getElementById('kpi-avg-metrics');
-    const historySearchInput = document.getElementById('history-search-input');
-    const filterPills = document.querySelectorAll('.filter-btn, .filter-pill-btn');
-    const historyTableTbody = document.getElementById('history-table-tbody');
-    const historyEmptyState = document.getElementById('history-empty-state');
-    const btnClearHistory = document.getElementById('btn-clear-history');
-    const btnRefreshHistory = document.getElementById('btn-refresh-history');
+  const severity = risk >= 50 ? 'severe' : risk >= 15 ? 'mild' : 'none';
+  const lowP = 1 / (1 + Math.exp(-(risk - 50) / 10));
+  const low = clamp(lowP * 100, 0.5, 99.5);
+  return {
+    grade: risk >= 50 ? 'LOW' : 'MEDIUM',
+    confidence: { medium: +(100 - low).toFixed(2), low: +low.toFixed(2) },
+    adulterant_type: adulterant, severity, warnings,
+  };
+}
 
-    // Presets & Telemetry
-    const presetsCleanGrid = document.getElementById('presets-clean-grid');
-    const btnSimulateEsp32 = document.getElementById('btn-simulate-esp32');
-    const telemetryTableBody = document.getElementById('telemetry-table-body');
-    const esp32Dot = document.getElementById('esp32-dot');
-    const esp32Text = document.getElementById('esp32-text');
+function nextSeq() { const n = (lsGet(LS_SEQ, 0) | 0) + 1; lsSet(LS_SEQ, n); return n; }
 
-    // Modal
-    const sampleModal = document.getElementById('sample-modal');
-    const btnCloseModal = document.getElementById('btn-close-modal');
-    const btnModalCloseOk = document.getElementById('btn-modal-close-ok');
-    const btnModalLoad = document.getElementById('btn-modal-load');
-    const modalSampleTitle = document.getElementById('modal-sample-title');
-    const modalSampleSubtitle = document.getElementById('modal-sample-subtitle');
-    const modalSampleBody = document.getElementById('modal-sample-body');
+function makeRecord(body, result) {
+  const id = nextSeq();
+  return {
+    id,
+    sample_name: (body.sample_name || '').trim() || `MLK-${String(id).padStart(4, '0')}`,
+    notes: body.notes || '',
+    timestamp: new Date().toISOString(),
+    temperature: +body.temperature, ph: +body.ph, color: +body.color, fat: +body.fat, turbidity: +body.turbidity,
+    grade: result.grade,
+    confidence: Math.max(result.confidence.medium, result.confidence.low),
+    confidence_detail: result.confidence,
+    adulterant_type: result.adulterant_type,
+    severity: result.severity,
+    source: normSource(body.source),
+  };
+}
 
-    // Toast Container
-    const toastContainer = document.getElementById('toast-container');
+function statsLocal(list) {
+  const total = list.length, low = list.filter(s => s.grade === 'LOW').length, med = total - low;
+  const avg = (k) => total ? list.reduce((a, s) => a + (+s[k] || 0), 0) / total : 0;
+  return {
+    total_tested: total, medium_count: med, low_count: low,
+    medium_pct: total ? +(med / total * 100).toFixed(1) : 0,
+    low_pct: total ? +(low / total * 100).toFixed(1) : 0,
+    adulteration_rate_pct: total ? +(low / total * 100).toFixed(1) : 0,
+    avg_ph: +avg('ph').toFixed(2), avg_temp: +avg('temperature').toFixed(1),
+  };
+}
 
-    // State Variables
-    let currentActiveGradeFilter = 'all';
-    let currentModalSampleData = null;
-    let liveDebounceTimer = null;
-    let sampleCounter = 107;
+function csvLocal(list) {
+  const cols = ['id','sample_name','notes','timestamp','temperature','ph','color','fat','turbidity','grade','confidence','adulterant_type','source'];
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  return [cols.join(','), ...list.map(s => cols.map(c => q(s[c])).join(','))].join('\n');
+}
 
-    // =========================================================================
-    // 1. TAB NAVIGATION
-    // =========================================================================
-    function switchTab(targetTabId) {
-        tabButtons.forEach(btn => {
-            if (btn.getAttribute('data-tab') === targetTabId) {
-                btn.classList.add('active');
-            } else {
-                btn.classList.remove('active');
-            }
-        });
+function localRoute(method, path, body) {
+  const url = new URL(path, 'http://local');
+  const p = url.pathname;
+  const hist = () => lsGet(LS_HISTORY, []);
 
-        tabViews.forEach(view => {
-            if (view.id === targetTabId) {
-                view.classList.add('active');
-            } else {
-                view.classList.remove('active');
-            }
-        });
+  if (method === 'POST' && p === '/api/predict') {
+    const r = classifyLocal(body);
+    let saved = null;
+    if (body.save_sample) { saved = makeRecord(body, r); lsSet(LS_HISTORY, [saved, ...hist()].slice(0, 1000)); }
+    return { ...r, saved_sample: saved };
+  }
+  if (method === 'GET' && p === '/api/history') {
+    let list = hist();
+    const g = url.searchParams.get('grade'), s = (url.searchParams.get('search') || '').toLowerCase(), lim = +url.searchParams.get('limit');
+    if (g && g !== 'all') list = list.filter(x => x.grade === g.toUpperCase());
+    if (s) list = list.filter(x => [x.sample_name, x.notes, x.adulterant_type].join(' ').toLowerCase().includes(s));
+    if (lim > 0) list = list.slice(0, lim);
+    return { samples: list, count: list.length };
+  }
+  if (method === 'GET' && p === '/api/history/stats') return statsLocal(hist());
+  if (method === 'POST' && p === '/api/history/clear') { lsSet(LS_HISTORY, []); return { ok: true }; }
+  if (method === 'DELETE' && p.startsWith('/api/history/')) {
+    const id = +p.split('/').pop(); lsSet(LS_HISTORY, hist().filter(x => x.id !== id)); return { ok: true };
+  }
+  if (method === 'GET' && p === '/api/history/export/csv') return { __csv: csvLocal(hist()) };
+  if (method === 'GET' && p === '/api/presets') return { presets: PRESETS };
+  if (method === 'GET' && p === '/api/esp32/live') {
+    const stream = lsGet(LS_STREAM, []);
+    const connected = stream.length > 0 && (Date.now() - new Date(stream[0].timestamp).getTime()) < 60000;
+    return { stream, connected };
+  }
+  if (method === 'POST' && p === '/api/esp32/telemetry') {
+    const r = classifyLocal(body);
+    const packet = {
+      timestamp: new Date().toISOString(), device_id: body.device_id || 'ESP32-NODE-01',
+      temperature: +body.temperature, ph: +body.ph, fat: +body.fat, turbidity: +body.turbidity, color: +body.color,
+      grade: r.grade, adulterant_type: r.adulterant_type, confidence: r.confidence,
+    };
+    lsSet(LS_STREAM, [packet, ...lsGet(LS_STREAM, [])].slice(0, 50));
+    const rec = makeRecord({ ...body, sample_name: `${packet.device_id}-${String(Date.now()).slice(-5)}`, notes: 'Automatic IoT telemetry', source: 'iot' }, r);
+    lsSet(LS_HISTORY, [rec, ...hist()].slice(0, 1000));
+    return { ...r, packet, saved_sample: rec };
+  }
+  throw new Error('Unknown route ' + method + ' ' + p);
+}
 
-        if (targetTabId === 'tab-history') {
-            loadSampleHistory();
-            loadHistoryStats();
-        } else if (targetTabId === 'tab-presets') {
-            loadPresets();
-        }
-    }
+/* ======================= API client ======================= */
+let backendLive = null;
+function setConn(live) {
+  if (backendLive === live) return;
+  backendLive = live;
+  const pill = $('#connPill');
+  pill.classList.toggle('live', live); pill.classList.toggle('demo', !live);
+  $('#connText').textContent = live ? 'Backend API connected' : 'Offline demo mode (local storage)';
+}
 
-    tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetId = btn.getAttribute('data-tab');
-            switchTab(targetId);
-        });
+async function api(method, path, body) {
+  try {
+    const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 6000);
+    const res = await fetch(API_BASE + path, {
+      method, signal: ctl.signal,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
     });
-
-    if (btnQuickHistory) {
-        btnQuickHistory.addEventListener('click', () => switchTab('tab-history'));
-    }
-
-    if (btnEmptyGotoBench) {
-        btnEmptyGotoBench.addEventListener('click', () => switchTab('tab-analyzer'));
-    }
-
-    // =========================================================================
-    // 2. NORMAL DIRECT NUMERIC INPUTS & STATUS GUIDES
-    // =========================================================================
-    function updateNormalInputsUI(triggerPrediction = true) {
-        const temp = parseFloat(inputTemp.value) || 36.5;
-        const ph = parseFloat(inputPh.value) || 6.70;
-        const color = parseInt(inputColor.value, 10) || 255;
-
-        // 1. Temperature Status & Zone
-        let tempStatus = 'Ideal Fresh (35.0 - 38.5°C)';
-        let tempColor = '#10b981';
-        if (temp < 35.0) {
-            tempStatus = 'Chilled (<35°C)';
-            tempColor = '#38bdf8';
-        } else if (temp <= 38.5) {
-            tempStatus = 'Ideal Fresh (35.0 - 38.5°C)';
-            tempColor = '#10b981';
-        } else if (temp <= 62.0) {
-            tempStatus = 'Warm Spoilage Risk (39 - 62°C)';
-            tempColor = '#f59e0b';
-        } else {
-            tempStatus = 'Boiled / Scalded (>62°C)';
-            tempColor = '#f43f5e';
-        }
-
-        if (guideTemp) {
-            guideTemp.innerHTML = `<span style="color: ${tempColor}; font-weight: 600;">● ${tempStatus}</span> &bull; Fresh: 35-38°C`;
-        }
-        if (badgeTempZone) {
-            badgeTempZone.textContent = tempStatus;
-        }
-        if (tempRibbonMarker) {
-            const tempPos = Math.min(100, Math.max(0, ((temp - 30.0) / (70.0 - 30.0)) * 100));
-            tempRibbonMarker.style.left = `${tempPos}%`;
-        }
-
-        // 2. pH Acidity Status & Zone
-        let phStatus = 'Pure Fresh Milk (6.50 - 6.80 pH)';
-        let phColor = '#10b981';
-        if (ph < 6.0) {
-            phStatus = 'Acidic Souring (<6.0 pH)';
-            phColor = '#f43f5e';
-        } else if (ph <= 6.85) {
-            phStatus = 'Pure Fresh Milk (6.50 - 6.80 pH)';
-            phColor = '#10b981';
-        } else if (ph <= 7.8) {
-            phStatus = 'Alkaline Neutralizer Buffer (7.0 - 7.8 pH)';
-            phColor = '#f59e0b';
-        } else {
-            phStatus = 'Caustic Soda / Detergent (>7.8 pH)';
-            phColor = '#f43f5e';
-        }
-
-        if (guidePh) {
-            guidePh.innerHTML = `<span style="color: ${phColor}; font-weight: 600;">● ${phStatus}</span> &bull; Fresh: 6.5-6.8 pH`;
-        }
-        if (badgePhZone) {
-            badgePhZone.textContent = phStatus;
-        }
-        if (phRibbonMarker) {
-            const phPos = Math.min(100, Math.max(0, ((ph - 4.0) / (9.5 - 4.0)) * 100));
-            phRibbonMarker.style.left = `${phPos}%`;
-        }
-
-        // 3. Color dot indicator
-        if (colorDotIndicator) {
-            const clampedColor = Math.min(255, Math.max(200, color));
-            const intensity = Math.round(195 + ((clampedColor - 200) / 55) * 60);
-            colorDotIndicator.style.backgroundColor = `rgb(${intensity}, ${intensity}, ${intensity})`;
-        }
-
-        if (triggerPrediction) {
-            clearTimeout(liveDebounceTimer);
-            liveDebounceTimer = setTimeout(() => {
-                runPrediction(false);
-            }, 180);
-        }
-    }
-
-    inputTemp.addEventListener('input', () => updateNormalInputsUI(true));
-    inputPh.addEventListener('input', () => updateNormalInputsUI(true));
-    inputColor.addEventListener('input', () => updateNormalInputsUI(true));
-    selectFat.addEventListener('change', () => updateNormalInputsUI(true));
-    selectTurb.addEventListener('change', () => updateNormalInputsUI(true));
-
-    // Reset Defaults
-    btnResetBench.addEventListener('click', () => {
-        inputTemp.value = 36.5;
-        inputPh.value = 6.70;
-        inputColor.value = 255;
-        selectFat.value = "1";
-        selectTurb.value = "1";
-        inputSampleName.value = `Sample #${sampleCounter}`;
-        inputSampleNotes.value = 'Pure whole milk baseline test';
-        updateNormalInputsUI(true);
-        showToast('Reset testing form to fresh whole milk defaults.');
-    });
-
-    // Auto-generate sample name
-    btnGenerateName.addEventListener('click', () => {
-        sampleCounter += 1;
-        const prefixes = ['Cow Milk Sample', 'Dairy Tanker Delivery', 'Retail Milk Pouch', 'Morning Chilling Batch', 'Lab Inspection Batch'];
-        const p = prefixes[Math.floor(Math.random() * prefixes.length)];
-        inputSampleName.value = `${p} #${sampleCounter}`;
-    });
-
-    // =========================================================================
-    // 3. PREDICTION & SPEEDOMETER GAUGE ANIMATION
-    // =========================================================================
-    async function runPrediction(saveToHistory = false) {
-        const payload = {
-            temperature: parseFloat(inputTemp.value) || 36.5,
-            fat: parseInt(selectFat.value, 10),
-            turbidity: parseInt(selectTurb.value, 10),
-            color: parseInt(inputColor.value, 10) || 255,
-            ph: parseFloat(inputPh.value) || 6.70,
-            sample_name: inputSampleName.value.trim() || `Sample #${sampleCounter}`,
-            notes: inputSampleNotes.value.trim() || '',
-            source: 'Interactive Lab Test',
-            save_sample: saveToHistory
-        };
-
-        try {
-            const res = await fetch('/api/predict', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!res.ok) throw new Error('Prediction API failed');
-            const data = await res.json();
-            renderPredictionResults(data);
-
-            if (saveToHistory) {
-                showToast(`Recorded "${payload.sample_name}" into Lab History!`);
-                sampleCounter += 1;
-                inputSampleName.value = `Cow Milk Sample #${sampleCounter}`;
-                loadHistoryStats();
-                loadSampleHistory();
-            }
-        } catch (err) {
-            console.error('[PREDICT ERROR]', err);
-        }
-    }
-
-    function renderPredictionResults(data) {
-        const grade = data.grade;
-        const conf = data.confidence || { medium: 50, low: 50 };
-        const medPct = conf.medium || 0;
-        const lowPct = conf.low || 0;
-        const warnings = data.warnings || [];
-        const adulterant = data.adulterant_type || 'None';
-
-        // 1. SVG Speedometer Needle & Quality Score
-        let qualityScore = medPct;
-        if (grade === 'Low') {
-            qualityScore = Math.max(5, Math.round(100 - lowPct));
-        } else {
-            qualityScore = Math.min(99, Math.round(medPct));
-        }
-
-        gaugeScoreValue.textContent = `${qualityScore}%`;
-        
-        // Needle angle: score 0% => 0 deg (points left), score 50% => 90 deg (points up), score 100% => 180 deg (points right)
-        const needleAngle = (qualityScore / 100) * 180;
-        if (gaugeNeedleGroup) {
-            gaugeNeedleGroup.setAttribute('transform', `rotate(${needleAngle}, 100, 100)`);
-        }
-
-        // Arc dashoffset: 251.32 is empty (0%), 0 is full (100%)
-        const arcOffset = 251.32 - (qualityScore / 100) * 251.32;
-        if (gaugeArcFill) {
-            gaugeArcFill.style.strokeDashoffset = arcOffset;
-            if (grade === 'Medium') {
-                gaugeArcFill.style.stroke = qualityScore > 75 ? '#10b981' : '#f59e0b';
-            } else {
-                gaugeArcFill.style.stroke = '#f43f5e';
-            }
-        }
-
-        // 2. Verdict Banner
-        verdictBanner.className = `verdict-banner ${grade === 'Medium' ? 'grade-medium' : 'grade-low'}`;
-        if (grade === 'Medium') {
-            verdictIcon.innerHTML = '<span>🛡️</span>';
-            verdictTitle.textContent = 'MEDIUM QUALITY (MILD / ACCEPTABLE)';
-            verdictDesc.textContent = 'Standard whole milk: Milkfat globules, colloidal opacity, and pH balance are within standard bounds.';
-        } else {
-            verdictIcon.innerHTML = '<span>⚠️</span>';
-            verdictTitle.textContent = 'LOW QUALITY (SEVERE ADULTERATION / SPOILAGE)';
-            verdictDesc.textContent = 'Critical violation: Chemical neutralizer, extreme dilution, or bacterial spoilage detected!';
-        }
-
-        // 3. Probability Progress Bars
-        probMediumVal.textContent = `${medPct.toFixed(1)}%`;
-        probMediumBar.style.width = `${medPct}%`;
-
-        probLowVal.textContent = `${lowPct.toFixed(1)}%`;
-        probLowBar.style.width = `${lowPct}%`;
-
-        // 4. Adulterant Profile Badge
-        adulterantVerdictBadge.textContent = adulterant;
-        adulterantVerdictBadge.className = 'adulterant-pill';
-        if (data.severity === 'danger') {
-            adulterantVerdictBadge.classList.add('danger');
-        } else if (data.severity === 'warning') {
-            adulterantVerdictBadge.classList.add('warning');
-        }
-
-        // 5. Sensor Checklist
-        diagnosisChecklist.innerHTML = '';
-        warnings.forEach(w => {
-            const item = document.createElement('div');
-            item.className = `diag-item ${w.level || 'normal'}`;
-            const bullet = w.level === 'danger' ? '⚠️' : (w.level === 'warning' ? '⚡' : '✓');
-            item.innerHTML = `
-                <span class="diag-bullet">${bullet}</span>
-                <div>
-                    <div class="diag-title">${w.type}</div>
-                    <div class="diag-text">${w.desc}</div>
-                </div>
-            `;
-            diagnosisChecklist.appendChild(item);
-        });
-    }
-
-    btnSaveTest.addEventListener('click', () => {
-        runPrediction(true);
-    });
-
-    // =========================================================================
-    // 4. TESTED SAMPLES HISTORY ENGINE
-    // =========================================================================
-    async function loadHistoryStats() {
-        try {
-            const res = await fetch('/api/history/stats');
-            const stats = await res.json();
-
-            kpiTotalTested.textContent = stats.total_tested;
-            kpiMediumCount.textContent = `${stats.medium_count} (${stats.medium_pct}%)`;
-            kpiLowCount.textContent = `${stats.low_count} (${stats.low_pct}%)`;
-            kpiAdulterationRate.textContent = `${stats.adulteration_rate_pct}%`;
-            kpiAvgMetrics.textContent = `${stats.avg_ph} pH • ${stats.avg_temp}°C`;
-
-            headerSampleCount.textContent = `${stats.total_tested} Records`;
-            tabHistoryCount.textContent = stats.total_tested;
-        } catch (err) {
-            console.error('[STATS ERROR]', err);
-        }
-    }
-
-    async function loadSampleHistory() {
-        const query = historySearchInput ? historySearchInput.value.trim() : '';
-        const url = `/api/history?grade=${currentActiveGradeFilter}&search=${encodeURIComponent(query)}&limit=150`;
-
-        try {
-            const res = await fetch(url);
-            const data = await res.json();
-            const samples = data.samples || [];
-
-            historyTableTbody.innerHTML = '';
-
-            if (samples.length === 0) {
-                historyEmptyState.classList.remove('hidden');
-                return;
-            } else {
-                historyEmptyState.classList.add('hidden');
-            }
-
-            samples.forEach(s => {
-                const tr = document.createElement('tr');
-                const isMedium = s.grade.toLowerCase() === 'medium';
-                const gradeClass = isMedium ? 'medium' : 'low';
-                const gradeSymbol = isMedium ? '🟢' : '🔴';
-
-                tr.innerHTML = `
-                    <td style="font-family: var(--font-mono); font-weight:700; color: var(--text-muted);">#${s.id}</td>
-                    <td>
-                        <div class="sample-name-cell">
-                            <span class="sample-name-title">${escapeHtml(s.sample_name)}</span>
-                            <span class="sample-name-sub">${escapeHtml(s.notes || 'No notes')}</span>
-                        </div>
-                    </td>
-                    <td style="font-size: 0.76rem; color: var(--text-muted);">${escapeHtml(s.timestamp)}</td>
-                    <td>
-                        <div class="sensor-chips-group">
-                            <span class="mini-chip" title="Temperature">🌡️ ${s.temperature.toFixed(1)}°C</span>
-                            <span class="mini-chip" title="pH Level">🧪 ${s.ph.toFixed(2)}</span>
-                            <span class="mini-chip" title="Fat Globules">🧈 ${s.fat === 1 ? 'Fat' : 'No Fat'}</span>
-                            <span class="mini-chip" title="Turbidity">🥛 ${s.turbidity === 1 ? 'SNF' : 'Watery'}</span>
-                            <span class="mini-chip" title="Color">🎨 ${s.color}</span>
-                        </div>
-                    </td>
-                    <td>
-                        <span class="grade-badge-table ${gradeClass}">
-                            <span>${gradeSymbol}</span>
-                            <span>${s.grade}</span>
-                        </span>
-                    </td>
-                    <td>
-                        <div style="font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700;">
-                            ${isMedium ? s.conf_medium : s.conf_low}%
-                        </div>
-                    </td>
-                    <td>
-                        <div style="font-size: 0.78rem; font-weight: 600; color: ${s.severity === 'danger' ? '#fb7185' : (s.severity === 'warning' ? '#fbbf24' : '#34d399')};">
-                            ${escapeHtml(s.adulterant_type)}
-                        </div>
-                    </td>
-                    <td>
-                        <span class="mini-chip" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8;">
-                            ${escapeHtml(s.source)}
-                        </span>
-                    </td>
-                    <td>
-                        <div class="table-row-actions">
-                            <button class="btn-table-action" data-action="inspect" data-id="${s.id}" title="Inspect full forensic breakdown">🔍</button>
-                            <button class="btn-table-action" data-action="load" data-id="${s.id}" title="Load values into form">🧪</button>
-                            <button class="btn-table-action delete" data-action="delete" data-id="${s.id}" title="Delete record">🗑️</button>
-                        </div>
-                    </td>
-                `;
-
-                // Add Row Action Listeners
-                tr.querySelector('[data-action="inspect"]').addEventListener('click', () => openInspectModal(s));
-                tr.querySelector('[data-action="load"]').addEventListener('click', () => loadSampleIntoBench(s));
-                tr.querySelector('[data-action="delete"]').addEventListener('click', () => deleteSampleRecord(s.id, tr));
-
-                historyTableTbody.appendChild(tr);
-            });
-        } catch (err) {
-            console.error('[LOAD HISTORY ERROR]', err);
-        }
-    }
-
-    // Filter Buttons
-    filterPills.forEach(btn => {
-        btn.addEventListener('click', () => {
-            filterPills.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentActiveGradeFilter = btn.getAttribute('data-filter');
-            loadSampleHistory();
-        });
-    });
-
-    // Search Filter
-    if (historySearchInput) {
-        historySearchInput.addEventListener('input', () => {
-            clearTimeout(liveDebounceTimer);
-            liveDebounceTimer = setTimeout(loadSampleHistory, 200);
-        });
-    }
-
-    if (btnRefreshHistory) {
-        btnRefreshHistory.addEventListener('click', () => {
-            loadSampleHistory();
-            loadHistoryStats();
-            showToast('Refreshed lab records.');
-        });
-    }
-
-    // Delete Record
-    async function deleteSampleRecord(id, rowElement) {
-        if (!confirm(`Are you sure you want to delete Sample #${id}?`)) return;
-
-        try {
-            const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                rowElement.style.opacity = '0';
-                setTimeout(() => {
-                    rowElement.remove();
-                    loadHistoryStats();
-                }, 200);
-                showToast(`Deleted Sample #${id}.`);
-            }
-        } catch (err) {
-            console.error('[DELETE ERROR]', err);
-        }
-    }
-
-    // Clear History
-    if (btnClearHistory) {
-        btnClearHistory.addEventListener('click', async () => {
-            if (!confirm('Are you sure you want to delete ALL sample history records?')) return;
-
-            try {
-                const res = await fetch('/api/history/clear', { method: 'POST' });
-                if (res.ok) {
-                    showToast('All tested samples cleared.');
-                    loadSampleHistory();
-                    loadHistoryStats();
-                }
-            } catch (err) {
-                console.error('[CLEAR HISTORY ERROR]', err);
-            }
-        });
-    }
-
-    // Load sample back into form
-    function loadSampleIntoBench(sample) {
-        inputTemp.value = sample.temperature;
-        inputPh.value = sample.ph;
-        inputColor.value = sample.color;
-        selectFat.value = String(sample.fat);
-        selectTurb.value = String(sample.turbidity);
-        inputSampleName.value = `${sample.sample_name} (Re-test)`;
-        inputSampleNotes.value = `Loaded from Record #${sample.id}`;
-
-        switchTab('tab-analyzer');
-        updateNormalInputsUI(true);
-        showToast(`Loaded ${sample.sample_name} into testing form.`);
-    }
-
-    // =========================================================================
-    // 5. INSPECTION MODAL (CLINICAL TEST CERTIFICATE)
-    // =========================================================================
-    function openInspectModal(sample) {
-        currentModalSampleData = sample;
-        modalSampleTitle.textContent = sample.sample_name;
-        modalSampleSubtitle.textContent = `Certificate #${sample.id} • ${sample.timestamp} • ${sample.source}`;
-
-        const isMedium = sample.grade.toLowerCase() === 'medium';
-        const gradeColor = isMedium ? '#fbbf24' : '#fb7185';
-        const gradeBg = isMedium ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)';
-        const gradeBorder = isMedium ? 'rgba(245, 158, 11, 0.4)' : 'rgba(244, 63, 94, 0.4)';
-
-        modalSampleBody.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:1.15rem; border-radius:12px; background:${gradeBg}; border:1px solid ${gradeBorder};">
-                <div>
-                    <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Quality Grade Verdict</div>
-                    <div style="font-family:var(--font-heading); font-size:1.25rem; font-weight:800; color:${gradeColor};">${sample.grade} QUALITY</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-size:0.75rem; color:var(--text-muted);">Confidence</div>
-                    <div style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:var(--text-primary);">
-                        ${isMedium ? sample.conf_medium : sample.conf_low}%
-                    </div>
-                </div>
-            </div>
-
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.75rem;">
-                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
-                    <div style="font-size:0.7rem; color:var(--text-muted);">Temperature</div>
-                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:#38bdf8;">${sample.temperature}°C</div>
-                </div>
-                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
-                    <div style="font-size:0.7rem; color:var(--text-muted);">pH Acidity</div>
-                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:#34d399;">${sample.ph} pH</div>
-                </div>
-                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
-                    <div style="font-size:0.7rem; color:var(--text-muted);">Fat Content</div>
-                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:var(--text-primary);">${sample.fat === 1 ? 'Present (1)' : 'Depleted (0)'}</div>
-                </div>
-                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
-                    <div style="font-size:0.7rem; color:var(--text-muted);">Turbidity Opacity</div>
-                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:var(--text-primary);">${sample.turbidity === 1 ? 'Normal SNF (1)' : 'Diluted (0)'}</div>
-                </div>
-                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
-                    <div style="font-size:0.7rem; color:var(--text-muted);">Optical Color</div>
-                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:var(--text-primary);">${sample.color}</div>
-                </div>
-            </div>
-
-            <div style="background:var(--bg-card-subtle); padding:1rem; border-radius:10px; border:1px solid var(--border-subtle);">
-                <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:0.25rem;">Adulterant Classification</div>
-                <div style="font-weight:700; color:${sample.severity === 'danger' ? '#fb7185' : (sample.severity === 'warning' ? '#fbbf24' : '#34d399')}; font-size:0.95rem;">
-                    ${sample.adulterant_type}
-                </div>
-                <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.35rem;">
-                    Inspection Notes: ${escapeHtml(sample.notes || 'Official laboratory bench observation.')}
-                </div>
-            </div>
-        `;
-
-        sampleModal.classList.remove('hidden');
-    }
-
-    function closeModal() {
-        sampleModal.classList.add('hidden');
-    }
-
-    btnCloseModal.addEventListener('click', closeModal);
-    btnModalCloseOk.addEventListener('click', closeModal);
-    btnModalLoad.addEventListener('click', () => {
-        if (currentModalSampleData) {
-            loadSampleIntoBench(currentModalSampleData);
-            closeModal();
-        }
-    });
-
-    sampleModal.addEventListener('click', (e) => {
-        if (e.target === sampleModal) closeModal();
-    });
-
-    // =========================================================================
-    // 6. PRESETS LOADER
-    // =========================================================================
-    async function loadPresets() {
-        try {
-            const res = await fetch('/api/presets');
-            const presets = await res.json();
-            presetsCleanGrid.innerHTML = '';
-
-            presets.forEach(p => {
-                const card = document.createElement('div');
-                card.className = 'preset-card';
-                const isMedium = p.expected.toLowerCase().includes('medium');
-                const badgeStyle = isMedium ? 'background:var(--color-amber-light); border:1px solid var(--color-amber-border); color:var(--color-amber);' : 'background:var(--color-rose-light); border:1px solid var(--color-rose-border); color:var(--color-rose);';
-
-                card.innerHTML = `
-                    <div>
-                        <div class="preset-card-top">
-                            <span class="preset-title-text">${escapeHtml(p.title)}</span>
-                            <span class="preset-badge-tag" style="${badgeStyle}">${p.expected}</span>
-                        </div>
-                        <p class="preset-desc-text">${escapeHtml(p.description)}</p>
-                        <div class="preset-sensor-pills">
-                            <span class="mini-chip">Temp: ${p.values.temperature}°C</span>
-                            <span class="mini-chip">pH: ${p.values.ph}</span>
-                            <span class="mini-chip">Fat: ${p.values.fat}</span>
-                            <span class="mini-chip">Turbidity: ${p.values.turbidity}</span>
-                            <span class="mini-chip">Color: ${p.values.color}</span>
-                        </div>
-                    </div>
-                    <button class="preset-btn-test">
-                        <span>🧪 Load & Test This Scenario</span>
-                    </button>
-                `;
-
-                card.querySelector('.preset-btn-test').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    inputTemp.value = p.values.temperature;
-                    inputPh.value = p.values.ph;
-                    inputColor.value = p.values.color;
-                    selectFat.value = String(p.values.fat);
-                    selectTurb.value = String(p.values.turbidity);
-                    inputSampleName.value = p.title;
-                    inputSampleNotes.value = p.description;
-
-                    switchTab('tab-analyzer');
-                    updateNormalInputsUI(true);
-                    runPrediction(true);
-                });
-
-                presetsCleanGrid.appendChild(card);
-            });
-        } catch (err) {
-            console.error('[PRESETS ERROR]', err);
-        }
-    }
-
-    // =========================================================================
-    // 7. LIVE ESP32 HARDWARE STREAM POLLING & SIMULATION
-    // =========================================================================
-    async function pollLiveTelemetry() {
-        try {
-            const res = await fetch('/api/esp32/live');
-            const data = await res.json();
-
-            if (data.connected && data.stream && data.stream.length > 0) {
-                esp32Dot.className = 'indicator-dot emerald';
-                esp32Text.textContent = 'Hardware Connected';
-
-                telemetryTableBody.innerHTML = '';
-                data.stream.slice(0, 15).forEach(row => {
-                    const tr = document.createElement('tr');
-                    const isMed = row.grade === 'Medium';
-                    const gradeColor = isMed ? '#b45309' : '#b91c1c';
-                    tr.innerHTML = `
-                        <td>${escapeHtml(row.timestamp)}</td>
-                        <td><code>${escapeHtml(row.device_id)}</code></td>
-                        <td>${row.temperature.toFixed(1)}</td>
-                        <td>${row.ph.toFixed(2)}</td>
-                        <td>${row.fat}</td>
-                        <td>${row.turbidity}</td>
-                        <td>${row.color}</td>
-                        <td style="font-weight:700; color:${gradeColor};">${row.grade}</td>
-                        <td>${escapeHtml(row.adulterant_type)}</td>
-                    `;
-                    telemetryTableBody.appendChild(tr);
-                });
-            } else {
-                esp32Dot.className = 'indicator-dot blue';
-                esp32Text.textContent = 'Listening (:5000)';
-            }
-        } catch (err) {
-            // Ignore background polling errors
-        }
-    }
-
-    // Simulate ESP32 Packet
-    btnSimulateEsp32.addEventListener('click', async () => {
-        const simSamples = [
-            { temp: 37.5, fat: 1, turb: 1, color: 255, ph: 6.75, id: 'ESP32_Node_FarmA' },
-            { temp: 42.0, fat: 0, turb: 0, color: 245, ph: 8.80, id: 'ESP32_Node_DairyPlant' },
-            { temp: 46.5, fat: 1, turb: 0, color: 249, ph: 4.55, id: 'ESP32_Node_Chiller3' }
-        ];
-        const s = simSamples[Math.floor(Math.random() * simSamples.length)];
-
-        try {
-            const res = await fetch('/api/esp32/telemetry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    device_id: s.id,
-                    temperature: s.temp,
-                    fat: s.fat,
-                    turbidity: s.turb,
-                    color: s.color,
-                    ph: s.ph
-                })
-            });
-
-            if (res.ok) {
-                showToast(`Transmitted IoT telemetry from ${s.id}!`);
-                pollLiveTelemetry();
-                loadHistoryStats();
-            }
-        } catch (err) {
-            console.error('[SIMULATION ERROR]', err);
-        }
-    });
-
-    // =========================================================================
-    // 8. NOTIFICATION TOAST UTILITY
-    // =========================================================================
-    function showToast(message) {
-        const toast = document.createElement('div');
-        toast.className = 'toast';
-        toast.innerHTML = `
-            <span>🥛</span>
-            <span>${escapeHtml(message)}</span>
-        `;
-        toastContainer.appendChild(toast);
-
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            setTimeout(() => toast.remove(), 250);
-        }, 3200);
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
-    }
-
-    // =========================================================================
-    // INITIALIZATION
-    // =========================================================================
-    updateNormalInputsUI(true);
-    loadHistoryStats();
-    loadPresets();
-    setInterval(pollLiveTelemetry, 3000);
+    clearTimeout(to);
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || (!ct.includes('json') && !ct.includes('csv'))) throw new Error('HTTP ' + res.status);
+    setConn(true);
+    return ct.includes('json') ? await res.json() : { __csv: await res.text() };
+  } catch (err) {
+    setConn(false);
+    return localRoute(method, path, body);
+  }
+}
+
+/* ======================= sensor logic (UI side) ======================= */
+function sensorChecks(v) {
+  const t = +v.temperature, ph = +v.ph, c = +v.color, fat = +v.fat, turb = +v.turbidity;
+  const out = [];
+  out.push(t >= 35 && t <= 38
+    ? { k:'ok', name:'Temperature', val:`${fmt(t)} °C`, msg:'Within the 35.0–38.0 °C collection window.' }
+    : { k: (t > 45 || t < 30) ? 'bad' : 'warn', name:'Temperature', val:`${fmt(t)} °C`, msg: t > 38 ? 'Elevated: accelerates bacterial growth and can mask spoilage.' : 'Below the expected collection range.' });
+  out.push(ph >= 6.5 && ph <= 6.8
+    ? { k:'ok', name:'pH Acidity', val:fmt(ph,2), msg:'Normal fresh-milk acidity (6.50–6.80).' }
+    : ph > 6.8
+      ? { k: ph >= 8 ? 'bad' : 'warn', name:'pH Acidity', val:fmt(ph,2), msg: ph >= 8 ? 'Strongly alkaline: indicates detergent or caustic soda neutralizer.' : 'Alkaline drift: possible urea or bicarbonate buffer.' }
+      : { k: ph <= 5.5 ? 'bad' : 'warn', name:'pH Acidity', val:fmt(ph,2), msg: ph <= 5.5 ? 'Strongly acidic: lactic fermentation / souring.' : 'Slightly acidic: early souring or dilution.' });
+  out.push(c >= 250
+    ? { k:'ok', name:'Color Whiteness', val:`${c}`, msg:'Healthy white reading.' }
+    : { k: c >= 244 ? 'warn' : 'bad', name:'Color Whiteness', val:`${c}`, msg: c >= 244 ? 'Slightly off-white: possible additives or dilution.' : 'Markedly reduced whiteness.' });
+  out.push(fat === 1
+    ? { k:'ok', name:'Fat Globules', val:'Present', msg:'Normal milkfat globules detected.' }
+    : { k:'bad', name:'Fat Globules', val:'Depleted', msg:'Fat absent: skimmed, emulsified or heavily diluted.' });
+  out.push(turb === 1
+    ? { k:'ok', name:'Turbidity SNF', val:'High', msg:'Solids-not-fat intact.' }
+    : { k:'bad', name:'Turbidity SNF', val:'Low', msg:'Watery opacity: SNF depleted (dilution or curdling).' });
+  return out;
+}
+
+const milkRGB = (c) => {
+  const d = 255 - clamp(+c || 0, 0, 255);
+  return `rgb(255, ${clamp(255 - d * 2, 120, 255)}, ${clamp(255 - d * 6, 60, 255)})`;
+};
+
+function gradeBadge(g) {
+  const gradeStr = String(g || '').toUpperCase();
+  return gradeStr === 'LOW'
+    ? '<span class="grade low">⚠ LOW</span>'
+    : '<span class="grade medium">✔ MEDIUM</span>';
+}
+function sensorBadges(s) {
+  const t = +s.temperature, ph = +s.ph, c = +s.color;
+  const cls = (ok, warn) => ok ? 'ok' : warn ? 'warn' : 'bad';
+  return `<div class="sensor-badges">
+    <span class="sb ${cls(t>=35&&t<=38, t>=30&&t<=45)}">🌡 ${fmt(t)}°C</span>
+    <span class="sb ${cls(ph>=6.5&&ph<=6.8, ph>=5.6&&ph<8)}">pH ${fmt(ph,2)}</span>
+    <span class="sb ${+s.fat===1?'ok':'bad'}">Fat ${+s.fat}</span>
+    <span class="sb ${+s.turbidity===1?'ok':'bad'}">Turb ${+s.turbidity}</span>
+    <span class="sb ${cls(c>=250, c>=244)}">RGB ${c}</span>
+  </div>`;
+}
+const when = (iso) => {
+  const d = new Date(iso); if (isNaN(d)) return '–';
+  return `${d.toLocaleDateString([], { day:'2-digit', month:'short', year:'numeric' })}<small>${d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })}</small>`;
+};
+
+function toast(msg, kind = '') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind; el.textContent = msg;
+  $('#toastHost').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2800);
+}
+
+/* ======================= tabs ======================= */
+let activeTab = 'bench';
+function showTab(name) {
+  activeTab = name;
+  $$('.tab').forEach(b => { const on = b.dataset.tab === name; b.classList.toggle('active', on); b.setAttribute('aria-selected', on); });
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === 'tab-' + name));
+  if (name === 'history') loadHistory();
+  if (name === 'esp32') loadStream();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+$$('.tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+/* ======================= TAB 1: bench ======================= */
+const f = {
+  name: $('#sampleName'), notes: $('#sampleNotes'),
+  temp: $('#inTemp'), ph: $('#inPh'), color: $('#inColor'), fat: $('#inFat'), turb: $('#inTurb'),
+};
+let lastBenchSample = null;
+
+function updateDot() { $('#colorDot').style.background = milkRGB(f.color.value); }
+f.color.addEventListener('input', updateDot);
+
+function readForm() {
+  return {
+    temperature: parseFloat(f.temp.value), ph: parseFloat(f.ph.value), color: parseInt(f.color.value, 10),
+    fat: parseInt(f.fat.value, 10), turbidity: parseInt(f.turb.value, 10),
+  };
+}
+function validateForm() {
+  const v = readForm(); let ok = true;
+  const rules = [[f.temp, v.temperature, 0, 100], [f.ph, v.ph, 0, 14], [f.color, v.color, 0, 255]];
+  rules.forEach(([el, val, lo, hi]) => {
+    const bad = !Number.isFinite(val) || val < lo || val > hi;
+    el.classList.toggle('invalid', bad); if (bad) ok = false;
+  });
+  return ok;
+}
+function setForm(v, meta) {
+  f.temp.value = fmt(v.temperature, 1); f.ph.value = fmt(v.ph, 2); f.color.value = v.color;
+  f.fat.value = String(v.fat); f.turb.value = String(v.turbidity);
+  if (meta) { if (meta.name !== undefined) f.name.value = meta.name; if (meta.notes !== undefined) f.notes.value = meta.notes; }
+  $$('.invalid').forEach(e => e.classList.remove('invalid'));
+  updateDot();
+}
+function resetForm() { setForm(PURE); toast('Defaults restored: pure whole milk'); }
+
+async function nextId() {
+  let max = 0;
+  try {
+    const { samples } = await api('GET', '/api/history?limit=1000');
+    samples.forEach(s => { const m = /(\d+)\s*$/.exec(s.sample_name || ''); if (m) max = Math.max(max, +m[1]); });
+    max = Math.max(max, samples.length);
+  } catch { /* ignore */ }
+  return `MLK-${String(max + 1).padStart(4, '0')}`;
+}
+$('#genIdBtn').addEventListener('click', async () => { f.name.value = await nextId(); });
+
+function renderResult(r, values) {
+  $('#resultsEmpty').hidden = true; $('#resultsBody').hidden = false;
+  const gradeStr = String(r.grade || '').toUpperCase();
+  const low = gradeStr === 'LOW';
+  const banner = $('#verdictBanner');
+  banner.className = 'verdict ' + (low ? 'low' : 'medium');
+  $('#verdictIcon').textContent = low ? '⚠' : '✔';
+  $('#verdictLabel').textContent = low ? 'LOW QUALITY (Severe Adulteration / Spoilage)' : 'MEDIUM QUALITY (Mild / Standard)';
+  $('#verdictSub').textContent = low ? 'Reject batch: do not use for consumption or processing.' : 'Batch is acceptable for standard handling.';
+  const m = +r.confidence.medium, l = +r.confidence.low;
+  $('#barMedium').style.width = '0%'; $('#barLow').style.width = '0%';
+  requestAnimationFrame(() => requestAnimationFrame(() => { $('#barMedium').style.width = m + '%'; $('#barLow').style.width = l + '%'; }));
+  $('#pctMedium').textContent = fmt(m, 1) + '%'; $('#pctLow').textContent = fmt(l, 1) + '%';
+  const sev = r.severity || (low ? 'severe' : 'none');
+  const ad = $('#adulterantBadge');
+  ad.className = 'adulterant-badge ' + sev;
+  ad.textContent = (sev === 'none' ? '✅ ' : sev === 'mild' ? '⚠️ ' : '☣️ ') + (r.adulterant_type || 'None - Pure Milk');
+  $('#checklist').innerHTML = sensorChecks(values).map(c => `
+    <li class="check ${c.k}">
+      <span class="check-ico">${c.k === 'ok' ? '✓' : c.k === 'warn' ? '!' : '✕'}</span>
+      <div><div class="check-name">${esc(c.name)}</div><div class="check-msg">${esc(c.msg)}</div></div>
+      <span class="check-val">${esc(c.val)}</span>
+    </li>`).join('');
+}
+
+async function runTest({ source = 'lab', silent = false } = {}) {
+  if (!validateForm()) { toast('Please enter valid sensor values.', 'err'); return null; }
+  const v = readForm();
+  const btn = $('#runBtn'); btn.disabled = true;
+  try {
+    const payload = {
+      ...v, sample_name: f.name.value.trim(), notes: f.notes.value.trim(), source, save_sample: true,
+    };
+    if (!payload.sample_name) { payload.sample_name = await nextId(); f.name.value = payload.sample_name; }
+    const r = await api('POST', '/api/predict', payload);
+    lastBenchSample = r.saved_sample || null;
+    renderResult(r, v);
+    refreshNavCount();
+    const gradeStr = String(r.grade || '').toUpperCase();
+    if (!silent) toast(`Recorded ${payload.sample_name}: ${gradeStr}`, gradeStr === 'LOW' ? 'err' : 'ok');
+    return r;
+  } catch (e) {
+    toast('Test failed: ' + e.message, 'err'); return null;
+  } finally { btn.disabled = false; }
+}
+
+$('#benchForm').addEventListener('submit', (e) => { e.preventDefault(); runTest(); });
+$('#resetBtn').addEventListener('click', resetForm);
+$('#benchForm').addEventListener('input', (e) => { if (e.target.classList?.contains('invalid')) e.target.classList.remove('invalid'); });
+
+async function refreshNavCount() {
+  try { const s = await api('GET', '/api/history/stats'); $('#navCount').textContent = s.total_tested; } catch { /* ignore */ }
+}
+
+/* ======================= TAB 2: history ======================= */
+let hFilter = 'all', hSearch = '', hCache = [];
+
+async function loadStats() {
+  const s = await api('GET', '/api/history/stats');
+  $('#kpiTotal').textContent = s.total_tested;
+  $('#kpiMedium').textContent = s.medium_count; $('#kpiMediumPct').textContent = fmt(s.medium_pct, 1) + '% of samples';
+  $('#kpiLow').textContent = s.low_count;       $('#kpiLowPct').textContent = fmt(s.low_pct, 1) + '% of samples';
+  $('#kpiRate').textContent = fmt(s.adulteration_rate_pct, 1) + '%';
+  $('#kpiPh').textContent = s.total_tested ? fmt(s.avg_ph, 2) : '–';
+  $('#kpiTemp').textContent = s.total_tested ? fmt(s.avg_temp, 1) : '–';
+  $('#navCount').textContent = s.total_tested;
+}
+
+async function loadHistory() {
+  const qs = new URLSearchParams({ limit: '500' });
+  if (hFilter !== 'all') qs.set('grade', hFilter);
+  if (hSearch) qs.set('search', hSearch);
+  const [{ samples }] = await Promise.all([api('GET', '/api/history?' + qs), loadStats()]);
+  hCache = samples;
+  renderHistory();
+}
+
+function renderHistory() {
+  const body = $('#historyBody');
+  $('#historyEmpty').hidden = hCache.length > 0;
+  $('#historyTable').style.display = hCache.length ? '' : 'none';
+  body.innerHTML = hCache.map(s => {
+    const src = normSource(s.source);
+    const conf = s.confidence_detail ? Math.max(s.confidence_detail.medium, s.confidence_detail.low) : (typeof s.confidence === 'object' ? Math.max(s.confidence.medium, s.confidence.low) : s.confidence || (String(s.grade).toUpperCase() === 'MEDIUM' ? s.conf_medium : s.conf_low));
+    return `<tr data-id="${esc(s.id)}">
+      <td class="id-cell">#${esc(s.id)}</td>
+      <td><div class="sample-name">${esc(s.sample_name)}</div><div class="sample-notes" title="${esc(s.notes)}">${esc(s.notes) || '<span style="color:#94a3b8">No notes</span>'}</div></td>
+      <td class="when">${when(s.timestamp)}</td>
+      <td>${sensorBadges(s)}</td>
+      <td>${gradeBadge(s.grade)}</td>
+      <td class="conf">${fmt(conf, 1)}%</td>
+      <td>${esc(s.adulterant_type || '–')}</td>
+      <td><span class="src ${SOURCE_CLASS[src]}">${SOURCE_LABEL[src]}</span></td>
+      <td><div class="row-actions">
+        <button class="ra" data-act="inspect" title="Inspect forensic breakdown">🔍 Inspect</button>
+        <button class="ra" data-act="load" title="Load into testing form">🧪 Load</button>
+        <button class="ra del" data-act="delete" title="Delete record">🗑️ Delete</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+$('#historyBody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]'); if (!btn) return;
+  const id = btn.closest('tr').dataset.id;
+  const s = hCache.find(x => String(x.id) === String(id)); if (!s) return;
+  if (btn.dataset.act === 'inspect') openModal(s);
+  if (btn.dataset.act === 'load') loadIntoBench(s);
+  if (btn.dataset.act === 'delete') {
+    if (!confirm(`Delete sample "${s.sample_name}" (#${s.id})?`)) return;
+    await api('DELETE', '/api/history/' + encodeURIComponent(s.id));
+    toast('Sample deleted'); loadHistory();
+  }
 });
+
+let searchTimer;
+$('#searchBox').addEventListener('input', (e) => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { hSearch = e.target.value.trim(); loadHistory(); }, 200); });
+$('#filterSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('.seg-btn'); if (!b) return;
+  $$('.seg-btn').forEach(x => x.classList.toggle('active', x === b));
+  hFilter = b.dataset.filter; loadHistory();
+});
+$('#refreshBtn').addEventListener('click', () => { loadHistory(); toast('History refreshed'); });
+$('#clearBtn').addEventListener('click', async () => {
+  const n = +$('#kpiTotal').textContent;
+  if (!n) return toast('History is already empty');
+  if (!confirm(`Permanently delete all ${n} tested sample records? This cannot be undone.`)) return;
+  await api('POST', '/api/history/clear'); toast('History cleared'); loadHistory();
+});
+$('#exportBtn').addEventListener('click', async () => {
+  const r = await api('GET', '/api/history/export/csv');
+  const blob = new Blob([r.__csv ?? ''], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `milk_samples_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('CSV exported', 'ok');
+});
+
+function loadIntoBench(s, { silent = false } = {}) {
+  setForm({ temperature: +s.temperature, ph: +s.ph, color: +s.color, fat: +s.fat, turbidity: +s.turbidity },
+          { name: s.sample_name, notes: s.notes });
+  showTab('bench');
+  if (!silent) toast(`Loaded ${s.sample_name} into the testing form`);
+}
+
+/* ---- forensic modal ---- */
+let modalSample = null;
+function openModal(s) {
+  modalSample = s;
+  const src = normSource(s.source);
+  const gradeStr = String(s.grade || '').toUpperCase();
+  const sev = s.severity || (gradeStr === 'LOW' ? 'severe' : (s.adulterant_type && !/none/i.test(s.adulterant_type) ? 'mild' : 'none'));
+  $('#modalTitle').textContent = `${s.sample_name}  ·  #${s.id}`;
+  const rows = [
+    ['Temperature', fmt(s.temperature, 1) + ' °C', PURE.temperature, +s.temperature, 1, ' °C'],
+    ['pH Acidity', fmt(s.ph, 2), PURE.ph, +s.ph, 2, ''],
+    ['Color Whiteness', s.color, PURE.color, +s.color, 0, ''],
+    ['Fat Globules', +s.fat === 1 ? '1 · Present' : '0 · Depleted', PURE.fat, +s.fat, 0, ''],
+    ['Turbidity SNF', +s.turbidity === 1 ? '1 · Intact' : '0 · Depleted', PURE.turbidity, +s.turbidity, 0, ''],
+  ].map(([n, shown, ref, val, d, u]) => {
+    const dev = val - ref;
+    const cls = Math.abs(dev) < 1e-9 ? 'dev-zero' : dev > 0 ? 'dev-pos' : 'dev-neg';
+    const txt = Math.abs(dev) < 1e-9 ? 'No deviation' : (dev > 0 ? '+' : '') + dev.toFixed(d) + u;
+    return `<tr><td><strong>${n}</strong></td><td>${esc(shown)}</td><td>${ref.toFixed(d)}${u}</td><td class="${cls}">${txt}</td></tr>`;
+  }).join('');
+  const rec = {
+    none:   ['✅ Safe: pure milk profile', ['Release batch for standard processing.', 'Maintain cold chain below 4 °C after collection.']],
+    mild:   ['⚠️ Caution: mild deviation / buffer suspected', ['Hold batch for confirmatory lab assay (urea, bicarbonate).', 'Re-test after 30 min at a stable temperature.', 'Flag supplier for follow-up sampling.']],
+    severe: ['☣️ Reject: severe adulteration or spoilage', ['Quarantine the batch immediately; do not blend with other lots.', 'Do not use for consumption or product manufacture.', 'Notify quality control and document the supplier source.', 'Send a retained sample for confirmatory chemical analysis.']],
+  }[sev];
+  const conf = s.confidence_detail ? s.confidence_detail : null;
+  const confVal = conf ? Math.max(conf.medium, conf.low) : (s.confidence || (gradeStr === 'MEDIUM' ? s.conf_medium : s.conf_low));
+  $('#modalBody').innerHTML = `
+    <div class="modal-meta">${gradeBadge(s.grade)}
+      <span class="src ${SOURCE_CLASS[src]}">${SOURCE_LABEL[src]}</span>
+      <span style="color:var(--muted);font-size:12.5px">${new Date(s.timestamp).toLocaleString()}</span></div>
+    <div><div class="mini-title" style="margin-top:0">Detected Adulterant</div>
+      <div class="adulterant-badge ${sev}">${esc(s.adulterant_type || 'None - Pure Milk')}</div>
+      ${conf ? `<div style="margin-top:8px;font-size:12.5px;color:var(--muted)">Confidence · Medium ${fmt(conf.medium,1)}% / Low ${fmt(conf.low,1)}%</div>` : `<div style="margin-top:8px;font-size:12.5px;color:var(--muted)">Model confidence · ${fmt(confVal,1)}%</div>`}
+    </div>
+    <div><div class="mini-title" style="margin-top:0">Deviation from Pure Whole Milk</div>
+      <table class="dev-table"><thead><tr><th>Parameter</th><th>Measured</th><th>Pure Reference</th><th>Deviation</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${s.notes ? `<div><div class="mini-title" style="margin-top:0">Inspection Notes</div><div>${esc(s.notes)}</div></div>` : ''}
+    <div class="rec ${sev}"><strong>${rec[0]}</strong><ul>${rec[1].map(x => `<li>${x}</li>`).join('')}</ul></div>`;
+  $('#modal').hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() { $('#modal').hidden = true; document.body.style.overflow = ''; modalSample = null; }
+$('#modalClose').addEventListener('click', closeModal);
+$('#modalCloseBtn').addEventListener('click', closeModal);
+$('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal').hidden) closeModal(); });
+$('#modalRetest').addEventListener('click', async () => {
+  const s = modalSample; if (!s) return;
+  closeModal(); loadIntoBench(s, { silent: true });
+  await runTest({ source: 'lab' });
+});
+
+/* ======================= TAB 3: presets ======================= */
+async function loadPresets() {
+  let list = PRESETS;
+  try {
+    const r = await api('GET', '/api/presets');
+    const arr = r.presets || r;
+    if (Array.isArray(arr) && arr.length) list = arr.map((p, i) => ({ ...(PRESETS[i] || {}), ...p, values: p.values || p.sensors || PRESETS[i]?.values }));
+  } catch { /* use built-ins */ }
+  $('#presetGrid').innerHTML = list.map((p, i) => {
+    const v = p.values || {};
+    return `<button type="button" class="preset ${esc(p.cls || 'pure')}" data-i="${i}">
+      <div class="preset-top"><span class="preset-emoji">${p.emoji || '🧪'}</span><span class="preset-tag">${esc(p.tag || 'Preset')}</span></div>
+      <h3>${esc(p.name)}</h3><p>${esc(p.desc || p.description || '')}</p>
+      <div class="preset-vals">
+        <span class="sb">🌡 ${fmt(v.temperature)}°C</span><span class="sb">pH ${fmt(v.ph, 2)}</span>
+        <span class="sb">Fat ${v.fat}</span><span class="sb">Turb ${v.turbidity}</span><span class="sb">RGB ${v.color}</span>
+      </div>
+      <div class="preset-cta">Load &amp; test →</div></button>`;
+  }).join('');
+  $('#presetGrid').onclick = async (e) => {
+    const card = e.target.closest('.preset'); if (!card) return;
+    const p = list[+card.dataset.i];
+    setForm(p.values, { name: '', notes: 'Preset: ' + p.name });
+    f.name.value = await nextId();
+    showTab('bench');
+    await runTest({ source: 'preset' });
+  };
+}
+
+/* ======================= TAB 4: ESP32 ======================= */
+let lastStreamKey = '';
+async function loadStream() {
+  const { stream, connected } = await api('GET', '/api/esp32/live');
+  $('#streamDot').classList.toggle('on', !!connected);
+  $('#streamText').textContent = connected ? 'Live: node(s) transmitting' : (stream.length ? 'Idle: no packets in the last minute' : 'Waiting for nodes…');
+  $('#streamEmpty').hidden = stream.length > 0;
+  $('#streamTable').style.display = stream.length ? '' : 'none';
+  const key = stream.length ? stream[0].timestamp + stream.length : '';
+  const isNew = key !== lastStreamKey && lastStreamKey !== '';
+  lastStreamKey = key;
+  $('#streamBody').innerHTML = stream.map((p, i) => `
+    <tr class="${isNew && i === 0 ? 'new-row' : ''}">
+      <td class="mono">${new Date(p.timestamp).toLocaleTimeString()}</td>
+      <td class="mono"><strong>${esc(p.device_id || p.mcu_id || 'ESP32')}</strong></td>
+      <td>${fmt(p.temperature)}°C</td><td>${fmt(p.ph, 2)}</td><td>${+p.fat}</td><td>${+p.turbidity}</td><td>${p.color}</td>
+      <td>${gradeBadge(p.grade)}</td><td>${esc(p.adulterant_type || '–')}</td>
+    </tr>`).join('');
+}
+
+$('#simBtn').addEventListener('click', async () => {
+  const base = PRESETS[Math.floor(Math.random() * PRESETS.length)].values;
+  const jit = (x, a) => x + (Math.random() * 2 - 1) * a;
+  const packet = {
+    device_id: 'ESP32-NODE-0' + (1 + Math.floor(Math.random() * 3)),
+    temperature: +jit(base.temperature, 0.6).toFixed(1),
+    ph: +clamp(jit(base.ph, 0.08), 0, 14).toFixed(2),
+    color: Math.round(clamp(jit(base.color, 1.2), 0, 255)),
+    fat: base.fat, turbidity: base.turbidity,
+  };
+  const btn = $('#simBtn'); btn.disabled = true;
+  try {
+    await api('POST', '/api/esp32/telemetry', packet);
+    await loadStream(); refreshNavCount();
+    toast(`Packet received from ${packet.device_id}`, 'ok');
+  } finally { btn.disabled = false; }
+});
+setInterval(() => { if (activeTab === 'esp32' && !document.hidden) loadStream(); }, 4000);
+
+/* ======================= TAB 5: figures ======================= */
+$$('.fig img').forEach(img => {
+  img.addEventListener('error', () => {
+    const ph = document.createElement('div');
+    ph.className = 'img-missing';
+    ph.innerHTML = `<div>Figure not found<br><code>${esc(new URL(img.src, location.href).pathname)}</code></div>`;
+    img.replaceWith(ph);
+  });
+});
+
+/* ======================= init ======================= */
+(async function init() {
+  setForm(PURE);
+  f.name.value = await nextId();
+  await Promise.all([loadPresets(), refreshNavCount()]);
+})();
+
+})();

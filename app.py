@@ -29,6 +29,14 @@ FEATURE_COLS = ['Temperature_Celsius', 'Fat', 'Turbidity', 'Color', 'pH']
 def serve_reports(filename):
     return send_from_directory(os.path.join(BASE_DIR, 'reports'), filename)
 
+@app.route('/styles.css')
+def serve_styles_css():
+    return send_from_directory(os.path.join(BASE_DIR, 'static', 'css'), 'styles.css')
+
+@app.route('/app.js')
+def serve_app_js():
+    return send_from_directory(os.path.join(BASE_DIR, 'static', 'js'), 'app.js')
+
 # Load Trained Calibrated Model
 print(f"[BACKEND] Loading calibrated model from {MODEL_PATH}...")
 try:
@@ -180,7 +188,7 @@ def api_predict():
     # Model input vector: [Temperature_Celsius, Fat, Turbidity, Color, pH]
     X_input = pd.DataFrame([[temp, fat, turbidity, color, ph]], columns=FEATURE_COLS)
     pred_raw = model.predict(X_input)[0]
-    grade = str(pred_raw)
+    grade = str(pred_raw).upper()
 
     # Probabilities
     probs = model.predict_proba(X_input)[0]
@@ -223,6 +231,7 @@ def api_predict():
     response = {
         'grade': grade,
         'confidence': prob_dict,
+        'confidence_detail': prob_dict,
         'adulterant_type': adulterant_type,
         'severity': severity,
         'warnings': warnings,
@@ -234,7 +243,7 @@ def api_predict():
             'ph': ph
         },
         'saved_sample': saved_record,
-        'timestamp': datetime.now().strftime('%H:%M:%S')
+        'timestamp': datetime.now().isoformat()
     }
     return jsonify(response)
 
@@ -258,7 +267,7 @@ def receive_esp32_telemetry():
         return jsonify({'error': f'Invalid ESP32 telemetry packet: {e}'}), 400
 
     X_input = pd.DataFrame([[temp, fat, turbidity, color, ph]], columns=FEATURE_COLS)
-    grade = str(model.predict(X_input)[0]) if model else "Medium"
+    grade = str(model.predict(X_input)[0]).upper() if model else "MEDIUM"
     probs = model.predict_proba(X_input)[0] if model else [0.5, 0.5]
     classes = list(model.classes_) if model else ['Low', 'Medium']
     

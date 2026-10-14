@@ -177,7 +177,14 @@ def get_all_samples(grade_filter: Optional[str] = None, search: Optional[str] = 
     cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    samples = []
+    for r in rows:
+        d = dict(r)
+        d['grade'] = str(d.get('grade', 'MEDIUM')).upper()
+        d['confidence_detail'] = {'medium': float(d.get('conf_medium', 50.0)), 'low': float(d.get('conf_low', 50.0))}
+        d['confidence'] = d['conf_medium'] if d['grade'] == 'MEDIUM' else d['conf_low']
+        samples.append(d)
+    return samples
 
 def get_sample_by_id(sample_id: int) -> Optional[Dict[str, Any]]:
     conn = get_db_connection()
@@ -185,7 +192,13 @@ def get_sample_by_id(sample_id: int) -> Optional[Dict[str, Any]]:
     cursor.execute("SELECT * FROM tested_samples WHERE id = ?", (sample_id,))
     row = cursor.fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    d['grade'] = str(d.get('grade', 'MEDIUM')).upper()
+    d['confidence_detail'] = {'medium': float(d.get('conf_medium', 50.0)), 'low': float(d.get('conf_low', 50.0))}
+    d['confidence'] = d['conf_medium'] if d['grade'] == 'MEDIUM' else d['conf_low']
+    return d
 
 def delete_sample_by_id(sample_id: int) -> bool:
     conn = get_db_connection()

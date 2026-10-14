@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MilkGuard AI · Dairy Quality Assurance Station</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">🥛</div>
+      <div>
+        <div class="brand-title">MilkGuard AI</div>
+        <div class="brand-sub">Adulteration Detection &amp; ESP32 IoT Quality Assurance</div>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Main navigation">
+      <button class="tab active" role="tab" data-tab="bench">🧪 Lab Testing Bench</button>
+      <button class="tab" role="tab" data-tab="history">📋 Tested Samples History <span class="tab-count" id="navCount">0</span></button>
+      <button class="tab" role="tab" data-tab="presets">🧬 Dairy Scenario Presets</button>
+      <button class="tab" role="tab" data-tab="esp32">📡 ESP32 Hardware Stream</button>
+      <button class="tab" role="tab" data-tab="model">📊 Model Intelligence &amp; EDA</button>
+    </nav>
+    <div class="conn-pill" id="connPill" title="Backend connection status"><span class="dot"></span><span id="connText">Checking…</span></div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- ============ TAB 1: LAB BENCH ============ -->
+  <section id="tab-bench" class="view active">
+    <div class="view-head">
+      <h1>Lab Testing Bench</h1>
+      <p>Enter the five physical sensor readings for a milk sample and run the AI grading model.</p>
+    </div>
+
+    <div class="grid-bench">
+      <form id="benchForm" class="card" autocomplete="off" novalidate>
+        <h2 class="card-title">Sample Metadata</h2>
+        <div class="form-row">
+          <label class="field grow">
+            <span class="label">Sample Name / Batch ID</span>
+            <div class="input-group">
+              <input type="text" id="sampleName" placeholder="e.g. MLK-0001" required>
+              <button type="button" class="btn btn-ghost" id="genIdBtn">Generate Next ID</button>
+            </div>
+          </label>
+        </div>
+        <label class="field">
+          <span class="label">Inspection Notes / Source</span>
+          <input type="text" id="sampleNotes" placeholder="e.g. Morning Tanker Chilled Milk">
+        </label>
+
+        <h2 class="card-title mt">Physical Sensor Inputs</h2>
+        <div class="sensor-grid">
+          <label class="field">
+            <span class="label">1 · Temperature <em>(DS18B20)</em></span>
+            <div class="num-wrap"><input type="number" id="inTemp" step="0.1" min="0" max="100" value="36.5"><span class="unit">°C</span></div>
+            <span class="hint">Normal range: 35.0 – 38.0 °C</span>
+          </label>
+
+          <label class="field">
+            <span class="label">2 · pH Acidity</span>
+            <div class="num-wrap"><input type="number" id="inPh" step="0.01" min="0" max="14" value="6.70"><span class="unit">pH</span></div>
+            <span class="hint">Normal range: 6.50 – 6.80 pH</span>
+          </label>
+
+          <label class="field">
+            <span class="label">3 · Color Whiteness <em>(TCS34725 RGB)</em></span>
+            <div class="num-wrap">
+              <span class="color-dot" id="colorDot" aria-hidden="true"></span>
+              <input type="number" id="inColor" step="1" min="0" max="255" value="255" class="has-dot">
+              <span class="unit">/ 255</span>
+            </div>
+            <span class="hint">Integer 240 – 255 · live colour preview</span>
+          </label>
+
+          <label class="field">
+            <span class="label">4 · Fat Globules</span>
+            <select id="inFat">
+              <option value="1">1 - Normal Milkfat Present (Pure)</option>
+              <option value="0">0 - Depleted / Skimmed / No Fat</option>
+            </select>
+            <span class="hint">Optical globule detector</span>
+          </label>
+
+          <label class="field span-2">
+            <span class="label">5 · Turbidity SNF</span>
+            <select id="inTurb">
+              <option value="1">1 - High / Normal Opacity (SNF Intact)</option>
+              <option value="0">0 - Low / Watery Dilution (SNF Depleted)</option>
+            </select>
+            <span class="hint">Solids-not-fat opacity channel</span>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit" class="btn btn-primary" id="runBtn">⚡ Run Test &amp; Record to History</button>
+          <button type="button" class="btn btn-secondary" id="resetBtn">Reset Defaults</button>
+        </div>
+      </form>
+
+      <aside class="card results" id="resultsPanel" aria-live="polite">
+        <h2 class="card-title">Classification &amp; Diagnostic Results</h2>
+        <div class="empty-state" id="resultsEmpty">
+          <div class="empty-icon">🔬</div>
+          <p>No result yet.<br>Fill in the sensor values and press <strong>Run Test</strong>.</p>
+        </div>
+        <div id="resultsBody" hidden>
+          <div class="verdict" id="verdictBanner">
+            <div class="verdict-icon" id="verdictIcon"></div>
+            <div>
+              <div class="verdict-label" id="verdictLabel"></div>
+              <div class="verdict-sub" id="verdictSub"></div>
+            </div>
+          </div>
+
+          <h3 class="mini-title">Confidence Probability</h3>
+          <div class="bar-row">
+            <span class="bar-name">Medium</span>
+            <div class="bar"><div class="bar-fill medium" id="barMedium"></div></div>
+            <span class="bar-pct" id="pctMedium">0%</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-name">Low</span>
+            <div class="bar"><div class="bar-fill low" id="barLow"></div></div>
+            <span class="bar-pct" id="pctLow">0%</span>
+          </div>
+
+          <h3 class="mini-title">Detected Adulterant</h3>
+          <div id="adulterantBadge" class="adulterant-badge"></div>
+
+          <h3 class="mini-title">5-Parameter Health Checklist</h3>
+          <ul class="checklist" id="checklist"></ul>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ TAB 2: HISTORY ============ -->
+  <section id="tab-history" class="view">
+    <div class="view-head">
+      <h1>Tested Samples History</h1>
+      <p>Every sample recorded from the bench, presets and ESP32 nodes.</p>
+    </div>
+
+    <div class="kpi-grid" id="kpiGrid">
+      <div class="kpi"><div class="kpi-label">Total Samples Tested</div><div class="kpi-value" id="kpiTotal">0</div><div class="kpi-foot">all sources</div></div>
+      <div class="kpi kpi-green"><div class="kpi-label">Standard / Mild Quality</div><div class="kpi-value" id="kpiMedium">0</div><div class="kpi-foot" id="kpiMediumPct">0%</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Severe Adulteration</div><div class="kpi-value" id="kpiLow">0</div><div class="kpi-foot" id="kpiLowPct">0%</div></div>
+      <div class="kpi kpi-amber"><div class="kpi-label">Adulteration Rate</div><div class="kpi-value" id="kpiRate">0%</div><div class="kpi-foot">of tested batches</div></div>
+      <div class="kpi kpi-blue"><div class="kpi-label">Batch Average</div><div class="kpi-value kpi-small"><span id="kpiPh">–</span> pH</div><div class="kpi-foot"><span id="kpiTemp">–</span> °C avg temp</div></div>
+    </div>
+
+    <div class="card toolbar">
+      <input type="search" id="searchBox" class="search" placeholder="🔎 Search by sample name, notes or adulterant…">
+      <div class="seg" id="filterSeg">
+        <button class="seg-btn active" data-filter="all">All Records</button>
+        <button class="seg-btn" data-filter="MEDIUM">Medium Only</button>
+        <button class="seg-btn" data-filter="LOW">Low (Adulterated) Only</button>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-secondary" id="refreshBtn">↻ Refresh</button>
+        <button class="btn btn-blue" id="exportBtn">⬇ Export CSV</button>
+        <button class="btn btn-danger" id="clearBtn">Clear History</button>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-scroll">
+        <table class="data-table" id="historyTable">
+          <thead>
+            <tr>
+              <th># ID</th><th>Sample Details</th><th>Date &amp; Time</th><th>Physical Sensors</th>
+              <th>AI Grade</th><th>Confidence</th><th>Chemical Adulterant</th><th>Source Tag</th><th class="right">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="historyEmpty" hidden>
+        <div class="empty-icon">🗂️</div>
+        <p>No samples match the current view.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB 3: PRESETS ============ -->
+  <section id="tab-presets" class="view">
+    <div class="view-head">
+      <h1>Dairy Scenario Presets</h1>
+      <p>One-click, realistic adulteration cases. Selecting a card loads the Bench form and runs the test.</p>
+    </div>
+    <div class="preset-grid" id="presetGrid"></div>
+  </section>
+
+  <!-- ============ TAB 4: ESP32 ============ -->
+  <section id="tab-esp32" class="view">
+    <div class="view-head">
+      <h1>ESP32 Hardware Stream</h1>
+      <p>Live telemetry from connected microcontroller nodes.</p>
+    </div>
+
+    <div class="iot-grid">
+      <div class="card iot-card">
+        <div class="iot-icon blue">📶</div>
+        <h3>Wi-Fi Endpoint</h3>
+        <code class="code-chip">POST /api/esp32/telemetry</code>
+        <p>Nodes push JSON sensor packets over HTTP.</p>
+      </div>
+      <div class="card iot-card">
+        <div class="iot-icon blue">🔌</div>
+        <h3>Serial Bridge</h3>
+        <code class="code-chip">python src/serial_bridge.py</code>
+        <p>USB serial forwarder for bench-top boards.</p>
+      </div>
+      <div class="card iot-card">
+        <div class="iot-icon blue">🧠</div>
+        <h3>On-chip Inference</h3>
+        <code class="code-chip">esp32_firmware/milk_model.h</code>
+        <p>Compiled model runs directly on the MCU.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="stream-head">
+        <div>
+          <h2 class="card-title nomargin">Live Telemetry</h2>
+          <div class="stream-status"><span class="dot" id="streamDot"></span><span id="streamText">Waiting for nodes…</span></div>
+        </div>
+        <button class="btn btn-blue" id="simBtn">📡 Simulate Incoming IoT Packet</button>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="streamTable">
+          <thead>
+            <tr><th>Timestamp</th><th>Microcontroller ID</th><th>Temp</th><th>pH</th><th>Fat</th><th>Turbidity</th><th>Color</th><th>Grade</th><th>Adulterant</th></tr>
+          </thead>
+          <tbody id="streamBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="streamEmpty">
+        <div class="empty-icon">📡</div>
+        <p>No packets received yet.<br>Use the simulate button or connect an ESP32 node.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TAB 5: MODEL ============ -->
+  <section id="tab-model" class="view">
+    <div class="view-head">
+      <h1>Model Intelligence &amp; EDA</h1>
+      <p>Academic validation metrics and exploratory data analysis for the calibration model.</p>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric green"><div class="metric-value">96.70%</div><div class="metric-label">Holdout Test Accuracy</div></div>
+      <div class="metric blue"><div class="metric-value">94.81% <small>(±0.98%)</small></div><div class="metric-label">5-Fold Stratified CV</div></div>
+      <div class="metric amber"><div class="metric-value">0.9525</div><div class="metric-label">Macro F1-Score</div></div>
+      <div class="metric blue"><div class="metric-value">&lt; 0.1 ms</div><div class="metric-label">ESP32 On-Chip Inference Time</div></div>
+    </div>
+
+    <div class="fig-grid">
+      <figure class="card fig">
+        <img src="/reports/figures/calibration_confusion_matrix.png" alt="Calibration confusion matrix" loading="lazy">
+        <figcaption>Confusion Matrix (calibration)</figcaption>
+      </figure>
+      <figure class="card fig">
+        <img src="/reports/figures/calibration_feature_importance.png" alt="Calibration feature importance" loading="lazy">
+        <figcaption>Feature Importance</figcaption>
+      </figure>
+      <figure class="card fig">
+        <img src="/reports/figures/eda_calibration_class_distribution.png" alt="Class distribution" loading="lazy">
+        <figcaption>EDA · Class Distribution</figcaption>
+      </figure>
+      <figure class="card fig">
+        <img src="/reports/figures/eda_calibration_sensor_decision_plane.png" alt="Sensor decision plane" loading="lazy">
+        <figcaption>EDA · Sensor Decision Plane</figcaption>
+      </figure>
+    </div>
+  </section>
+</main>
+
+<!-- Forensic modal -->
+<div class="modal-backdrop" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <div>
+        <div class="modal-kicker">Forensic Chemical Breakdown</div>
+        <h2 id="modalTitle">Sample</h2>
+      </div>
+      <button class="icon-btn" id="modalClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" id="modalCloseBtn">Close</button>
+      <button class="btn btn-primary" id="modalRetest">🧪 Re-test in Bench</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-host" id="toastHost" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
