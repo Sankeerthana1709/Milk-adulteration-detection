@@ -28,3 +28,6 @@ desktop.ini
 
 # Log files
 *.log
+
+# SQLite local runtime databases
+data/*.db

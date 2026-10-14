@@ -1,7 +1,8 @@
 """
 Flask Backend Web Application for AI-Based Milk Adulteration Detection
 Serves the modern frontend dashboard, provides REST API for model predictions,
-and receives real-time IoT telemetry from ESP32 microcontrollers.
+receives real-time IoT telemetry from ESP32 microcontrollers, and manages
+persistent SQLite sample testing history.
 """
 
 import os
@@ -10,8 +11,10 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 from flask_cors import CORS
+
+import src.sample_database as db
 
 app = Flask(__name__)
 CORS(app)
@@ -152,7 +155,10 @@ def index():
 
 @app.route('/api/predict', methods=['POST'])
 def api_predict():
-    """Predicts milk adulteration grade from sensor inputs."""
+    """
+    Predicts milk adulteration grade from sensor inputs.
+    Optionally saves the tested sample to the SQLite history log.
+    """
     data = request.get_json() or {}
     try:
         temp = float(data.get('temperature', 38.0))
@@ -160,6 +166,11 @@ def api_predict():
         turbidity = int(data.get('turbidity', 1))
         color = int(data.get('color', 255))
         ph = float(data.get('ph', 6.8))
+        
+        sample_name = data.get('sample_name', '')
+        notes = data.get('notes', '')
+        source = data.get('source', 'Interactive Lab Test')
+        save_sample_flag = data.get('save_sample', True)
     except (ValueError, TypeError) as e:
         return jsonify({'error': f'Invalid sensor parameters: {e}'}), 400
 
@@ -188,6 +199,27 @@ def api_predict():
 
     warnings, adulterant_type, severity = diagnose_milk(temp, fat, turbidity, color, ph)
 
+    saved_record = None
+    if save_sample_flag:
+        try:
+            saved_record = db.save_sample(
+                sample_name=sample_name,
+                temperature=temp,
+                fat=fat,
+                turbidity=turbidity,
+                color=color,
+                ph=ph,
+                grade=grade,
+                conf_medium=prob_dict.get('medium', 0.0),
+                conf_low=prob_dict.get('low', 0.0),
+                adulterant_type=adulterant_type,
+                severity=severity,
+                source=source,
+                notes=notes
+            )
+        except Exception as db_err:
+            print(f"[DB SAVE WARNING] Could not persist sample: {db_err}")
+
     response = {
         'grade': grade,
         'confidence': prob_dict,
@@ -201,6 +233,7 @@ def api_predict():
             'color': color,
             'ph': ph
         },
+        'saved_sample': saved_record,
         'timestamp': datetime.now().strftime('%H:%M:%S')
     }
     return jsonify(response)
@@ -211,6 +244,7 @@ def receive_esp32_telemetry():
     """
     Endpoint for ESP32 microcontrollers to push live sensor packets over WiFi.
     Payload: {"temperature": 38.0, "fat": 1, "turbidity": 1, "color": 255, "ph": 6.8}
+    Also logs the packet to the persistent sample history database.
     """
     data = request.get_json() or {}
     try:
@@ -219,6 +253,7 @@ def receive_esp32_telemetry():
         turbidity = int(data.get('turbidity', 1))
         color = int(data.get('color', 255))
         ph = float(data.get('ph', 6.8))
+        device_id = data.get('device_id', 'ESP32_Node_1')
     except (ValueError, TypeError) as e:
         return jsonify({'error': f'Invalid ESP32 telemetry packet: {e}'}), 400
 
@@ -232,7 +267,7 @@ def receive_esp32_telemetry():
     warnings, adulterant_type, severity = diagnose_milk(temp, fat, turbidity, color, ph)
 
     packet = {
-        'device_id': data.get('device_id', 'ESP32_Node_1'),
+        'device_id': device_id,
         'timestamp': datetime.now().strftime('%H:%M:%S'),
         'temperature': temp,
         'fat': fat,
@@ -249,6 +284,26 @@ def receive_esp32_telemetry():
     if len(live_telemetry_stream) > MAX_TELEMETRY_HISTORY:
         live_telemetry_stream.pop()
 
+    # Automatically persist to SQLite database
+    try:
+        db.save_sample(
+            sample_name=f"IoT Telemetry ({device_id})",
+            temperature=temp,
+            fat=fat,
+            turbidity=turbidity,
+            color=color,
+            ph=ph,
+            grade=grade,
+            conf_medium=conf_dict.get('medium', 50.0),
+            conf_low=conf_dict.get('low', 50.0),
+            adulterant_type=adulterant_type,
+            severity=severity,
+            source="ESP32 IoT Node",
+            notes=f"Auto-logged via WiFi endpoint from {device_id}"
+        )
+    except Exception as db_err:
+        print(f"[DB ESP32 SAVE WARNING] {db_err}")
+
     return jsonify({'status': 'success', 'received': packet})
 
 
@@ -261,6 +316,68 @@ def get_live_esp32_stream():
         'last_reading': live_telemetry_stream[0] if live_telemetry_stream else None
     })
 
+
+# =========================================================================
+# SAMPLE HISTORY DATABASE REST APIS
+# =========================================================================
+
+@app.route('/api/history', methods=['GET'])
+def get_sample_history():
+    """Returns tested milk samples with optional grade filter and keyword search."""
+    grade = request.args.get('grade', 'all')
+    search = request.args.get('search', '')
+    limit = int(request.args.get('limit', 100))
+    samples = db.get_all_samples(grade_filter=grade, search=search, limit=limit)
+    return jsonify({'samples': samples, 'count': len(samples)})
+
+
+@app.route('/api/history/<int:sample_id>', methods=['GET'])
+def get_sample_detail(sample_id):
+    """Returns details of a specific tested milk sample."""
+    sample = db.get_sample_by_id(sample_id)
+    if not sample:
+        return jsonify({'error': 'Sample record not found'}), 404
+    return jsonify(sample)
+
+
+@app.route('/api/history/<int:sample_id>', methods=['DELETE'])
+def delete_sample_record(sample_id):
+    """Deletes a specific sample from history."""
+    success = db.delete_sample_by_id(sample_id)
+    if not success:
+        return jsonify({'error': 'Sample not found or already deleted'}), 404
+    return jsonify({'status': 'success', 'deleted_id': sample_id})
+
+
+@app.route('/api/history/clear', methods=['POST'])
+def clear_sample_history():
+    """Clears all records from the sample history database."""
+    deleted_count = db.clear_all_samples()
+    return jsonify({'status': 'success', 'deleted_count': deleted_count})
+
+
+@app.route('/api/history/stats', methods=['GET'])
+def get_history_stats():
+    """Returns aggregated KPIs and adulteration statistics of all tested samples."""
+    stats = db.get_samples_stats()
+    return jsonify(stats)
+
+
+@app.route('/api/history/export/csv', methods=['GET'])
+def export_history_csv():
+    """Generates and downloads a clean CSV file of all tested samples."""
+    csv_content = db.export_samples_as_csv()
+    filename = f"milk_tested_samples_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return Response(
+        csv_content,
+        mimetype="text/csv",
+        headers={"Content-disposition": f"attachment; filename={filename}"}
+    )
+
+
+# =========================================================================
+# PRESETS & DATASET STATS
+# =========================================================================
 
 @app.route('/api/presets', methods=['GET'])
 def get_presets():

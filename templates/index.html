@@ -3,293 +3,524 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MilkShield AI | Real-Time Milk Adulteration Detection & ESP32 IoT Dashboard</title>
-    <meta name="description" content="AI-based real-time milk adulteration detection dashboard connected with ESP32 IoT sensors for pH, temperature, turbidity, fat, and TCS34725 RGB color.">
+    <title>MilkShield AI | Advanced Milk Adulteration Detection & Lab History</title>
+    <meta name="description" content="Next-generation AI milk quality and chemical adulteration detection platform integrating ESP32 IoT sensors with a 96.70% calibrated machine learning model and persistent lab test history.">
     
-    <!-- Google Fonts -->
+    <!-- Google Fonts: Plus Jakarta Sans & Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     
-    <!-- Vanilla CSS -->
+    <!-- Custom Design System CSS -->
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <!-- Background Glow Elements -->
-    <div class="glow-orb orb-1"></div>
-    <div class="glow-orb orb-2"></div>
-    <div class="glow-orb orb-3"></div>
+    <!-- Ambient Radial Glow Effects -->
+    <div class="ambient-glow glow-emerald"></div>
+    <div class="ambient-glow glow-cyan"></div>
+    <div class="ambient-glow glow-rose"></div>
+    <div class="ambient-grid"></div>
 
-    <div class="app-container">
-        <!-- Header -->
-        <header class="navbar">
-            <div class="nav-brand">
-                <div class="brand-icon">
+    <div class="app-layout">
+        <!-- Top Command Navbar -->
+        <header class="app-header">
+            <div class="brand-container">
+                <div class="brand-logo">
                     <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M7 2h10l1 4H6l1-4zM6 6v14a2 2 0 002 2h8a2 2 0 002-2V6H6z"/>
-                        <path d="M10 11v6M14 11v6"/>
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                        <circle cx="12" cy="12" r="9" stroke-opacity="0.3" />
                     </svg>
+                    <span class="logo-pulse"></span>
                 </div>
-                <div>
-                    <h1 class="brand-title">MilkShield <span class="accent-text">AI</span></h1>
-                    <p class="brand-subtitle">ESP32 IoT Milk Quality & Chemical Adulteration Detection</p>
+                <div class="brand-text">
+                    <div class="brand-title">MilkShield <span class="brand-accent">AI</span> <span class="version-tag">v2.4 Lab Pro</span></div>
+                    <div class="brand-desc">AI-Driven Dairy Quality & Chemical Adulteration Forensic System</div>
                 </div>
             </div>
 
-            <div class="nav-metrics">
-                <div class="metric-pill">
-                    <span class="pill-dot green"></span>
-                    <span class="pill-label">Model Accuracy:</span>
-                    <span class="pill-val">96.70% (Calibrated)</span>
+            <!-- Header Quick Stats & Telemetry Status -->
+            <div class="header-badges">
+                <div class="status-badge" id="badge-model-accuracy">
+                    <span class="indicator-dot emerald"></span>
+                    <span class="badge-label">Model Accuracy:</span>
+                    <span class="badge-val">96.70% (Calibrated)</span>
                 </div>
-                <div class="metric-pill">
-                    <span class="pill-dot blue" id="esp32-status-dot"></span>
-                    <span class="pill-label">ESP32 Telemetry:</span>
-                    <span class="pill-val" id="esp32-status-text">Listening</span>
+
+                <div class="status-badge" id="badge-esp32-status">
+                    <span class="indicator-dot cyan" id="esp32-dot"></span>
+                    <span class="badge-label">ESP32 IoT:</span>
+                    <span class="badge-val" id="esp32-text">Listening</span>
+                </div>
+
+                <div class="status-badge cursor-pointer" id="btn-quick-history" title="Click to view history">
+                    <span class="indicator-dot amber"></span>
+                    <span class="badge-label">Tested Samples:</span>
+                    <span class="badge-val highlight" id="header-sample-count">5 Records</span>
                 </div>
             </div>
         </header>
 
-        <!-- Navigation Tabs -->
-        <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="analyzer-tab" id="btn-tab-analyzer">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-3 3"/></svg>
-                Live Interactive Analyzer
-            </button>
-            <button class="tab-btn" data-tab="presets-tab" id="btn-tab-presets">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                Dairy Scenario Presets
-            </button>
-            <button class="tab-btn" data-tab="telemetry-tab" id="btn-tab-telemetry">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49M7.76 7.76a6 6 0 000 8.49m12.73-12.73a10 10 0 010 14.14M3.51 3.51a10 10 0 000 14.14"/></svg>
-                ESP32 Hardware Stream
-            </button>
-            <button class="tab-btn" data-tab="model-tab" id="btn-tab-model">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
-                Model Intelligence & Metrics
-            </button>
+        <!-- Main Tab Navigation -->
+        <nav class="nav-tabs-wrapper">
+            <div class="nav-tabs">
+                <button class="nav-tab-btn active" data-tab="tab-analyzer" id="btn-tab-analyzer">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2v7.31M14 9.3V1.99M8.5 2h7M14 9.3a6.5 6.5 0 1 1-4 0"/></svg>
+                    <span>Lab Testing Bench</span>
+                </button>
+                <button class="nav-tab-btn" data-tab="tab-history" id="btn-tab-history">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span>Tested Samples History</span>
+                    <span class="tab-counter-badge" id="tab-history-count">5</span>
+                </button>
+                <button class="nav-tab-btn" data-tab="tab-presets" id="btn-tab-presets">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                    <span>Dairy Scenario Presets</span>
+                </button>
+                <button class="nav-tab-btn" data-tab="tab-telemetry" id="btn-tab-telemetry">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+                    <span>ESP32 Hardware Stream</span>
+                </button>
+                <button class="nav-tab-btn" data-tab="tab-model" id="btn-tab-model">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                    <span>AI Model & EDA</span>
+                </button>
+            </div>
         </nav>
 
-        <!-- Main Content Area -->
-        <main class="content-viewport">
-            
-            <!-- TAB 1: LIVE INTERACTIVE ANALYZER -->
-            <section class="tab-pane active" id="analyzer-tab">
-                <div class="dashboard-grid">
-                    <!-- Left: Sensor Controls Panel -->
-                    <div class="glass-card controls-card">
-                        <div class="card-header">
-                            <h2 class="card-title">IoT Sensor Input Telemetry</h2>
-                            <button class="btn-reset" id="btn-reset-inputs" title="Reset to fresh milk defaults">Reset Defaults</button>
-                        </div>
-                        <p class="card-desc">Adjust the 5 physical sensors integrated with your ESP32 to test classification and chemical adulteration in real-time.</p>
+        <!-- Main Workspace -->
+        <main class="main-content">
 
-                        <!-- Sensor 1: Temperature -->
-                        <div class="control-group">
-                            <div class="control-label-row">
-                                <span class="control-name">
-                                    <span class="sensor-icon">🌡️</span> Temperature (DS18B20)
-                                </span>
-                                <span class="control-badge" id="temp-badge">36.0 °C</span>
+            <!-- ======================================================== -->
+            <!-- TAB 1: LAB TESTING BENCH (ANALYZER)                      -->
+            <!-- ======================================================== -->
+            <section class="tab-view active" id="tab-analyzer">
+                <div class="workbench-grid">
+                    
+                    <!-- Left Column: Physical Sensor Inputs Panel -->
+                    <div class="glass-panel input-panel">
+                        <div class="panel-header">
+                            <div>
+                                <h2 class="panel-title">Physical Sensor Telemetry Controls</h2>
+                                <p class="panel-subtitle">Simulate real-time readings or capture physical ESP32 values</p>
                             </div>
-                            <input type="range" class="custom-slider" id="slider-temp" min="30" max="90" step="0.5" value="36.0">
-                            <div class="slider-scale">
-                                <span>Cold (30°C)</span>
-                                <span class="optimal-tag">Ideal (35-38°C)</span>
-                                <span>Spoilage (45-62°C)</span>
-                                <span>Boiled (90°C)</span>
-                            </div>
+                            <button class="btn-subtle" id="btn-reset-bench" title="Reset all sensors to clean whole milk">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                Reset Defaults
+                            </button>
                         </div>
 
-                        <!-- Sensor 2: pH Level -->
-                        <div class="control-group">
-                            <div class="control-label-row">
-                                <span class="control-name">
-                                    <span class="sensor-icon">🧪</span> pH Level (Analog Probe)
-                                </span>
-                                <span class="control-badge" id="ph-badge">6.60 pH</span>
-                            </div>
-                            <input type="range" class="custom-slider ph-gradient-track" id="slider-ph" min="3.0" max="10.0" step="0.05" value="6.60">
-                            <div class="slider-scale">
-                                <span class="danger-tag">Acidic (<6.4)</span>
-                                <span class="optimal-tag">Fresh (6.5-6.8)</span>
-                                <span class="danger-tag">Alkaline (>7.0)</span>
-                            </div>
-                        </div>
-
-                        <!-- Sensor 3: Color (TCS34725 RGB) -->
-                        <div class="control-group">
-                            <div class="control-label-row">
-                                <span class="control-name">
-                                    <span class="sensor-icon">🎨</span> Whiteness (TCS34725 Color)
-                                </span>
-                                <div class="color-val-group">
-                                    <div class="color-preview-swatch" id="color-swatch"></div>
-                                    <span class="control-badge" id="color-badge">254</span>
+                        <!-- Sample Metadata Input (Name & Source) -->
+                        <div class="sample-meta-row">
+                            <div class="input-field-group">
+                                <label for="input-sample-name">Sample Name / Batch ID</label>
+                                <div class="input-with-button">
+                                    <input type="text" id="input-sample-name" placeholder="e.g., Farm Fresh Batch #204" value="Cow Milk Sample #106">
+                                    <button class="btn-icon" id="btn-generate-name" title="Auto-generate new sample name">🎲</button>
                                 </div>
                             </div>
-                            <input type="range" class="custom-slider" id="slider-color" min="240" max="255" step="1" value="254">
-                            <div class="slider-scale">
-                                <span>Off-white/Watery (240)</span>
-                                <span>Normal White</span>
-                                <span>Bright Milk (255)</span>
+                            <div class="input-field-group">
+                                <label for="input-sample-notes">Milk Source / Inspection Notes</label>
+                                <input type="text" id="input-sample-notes" placeholder="e.g. Tanker B - Morning Delivery" value="Direct chilling tank test">
                             </div>
                         </div>
 
-                        <!-- Binary Sensor Switches: Fat & Turbidity -->
-                        <div class="switch-grid">
-                            <!-- Fat Toggle -->
-                            <div class="toggle-card">
-                                <div class="toggle-info">
-                                    <span class="toggle-icon">🧈</span>
-                                    <div>
-                                        <div class="toggle-title">Fat Globules</div>
-                                        <div class="toggle-sub" id="fat-subtext">Optimal Fat Present (1)</div>
+                        <div class="sensor-controls-wrapper">
+                            <!-- Sensor 1: Temperature -->
+                            <div class="sensor-control-card">
+                                <div class="sensor-card-top">
+                                    <div class="sensor-identity">
+                                        <div class="sensor-glyph temp-glyph">🌡️</div>
+                                        <div>
+                                            <div class="sensor-title">Temperature (DS18B20)</div>
+                                            <div class="sensor-zone" id="temp-zone-label">Ideal Holding (35°C - 38°C)</div>
+                                        </div>
+                                    </div>
+                                    <div class="sensor-readout" id="display-temp">36.5 °C</div>
+                                </div>
+                                <input type="range" class="tech-slider" id="slider-temp" min="30.0" max="90.0" step="0.5" value="36.5">
+                                <div class="slider-ticks">
+                                    <span>Chilled (30°C)</span>
+                                    <span class="tick-opt">Fresh (35-38°C)</span>
+                                    <span class="tick-warn">Warm Spoilage (45-62°C)</span>
+                                    <span>Boiled (90°C)</span>
+                                </div>
+                            </div>
+
+                            <!-- Sensor 2: pH Probe -->
+                            <div class="sensor-control-card">
+                                <div class="sensor-card-top">
+                                    <div class="sensor-identity">
+                                        <div class="sensor-glyph ph-glyph">🧪</div>
+                                        <div>
+                                            <div class="sensor-title">pH Acidity / Neutralizer Probe</div>
+                                            <div class="sensor-zone" id="ph-zone-label">Normal Fresh Milk (6.5 - 6.8 pH)</div>
+                                        </div>
+                                    </div>
+                                    <div class="sensor-readout highlight-ph" id="display-ph">6.70 pH</div>
+                                </div>
+                                <input type="range" class="tech-slider slider-ph-track" id="slider-ph" min="3.00" max="10.00" step="0.05" value="6.70">
+                                <div class="slider-ticks">
+                                    <span class="tick-danger">Acidic (&lt;6.0)</span>
+                                    <span class="tick-opt">Neutral (6.5 - 6.8)</span>
+                                    <span class="tick-warn">Buffered (7.0 - 7.5)</span>
+                                    <span class="tick-danger">Caustic Soda (&gt;8.0)</span>
+                                </div>
+                            </div>
+
+                            <!-- Sensor 3: TCS34725 Color Sensor -->
+                            <div class="sensor-control-card">
+                                <div class="sensor-card-top">
+                                    <div class="sensor-identity">
+                                        <div class="sensor-glyph color-glyph">🎨</div>
+                                        <div>
+                                            <div class="sensor-title">Whiteness / Color Reflectance (TCS34725)</div>
+                                            <div class="sensor-zone" id="color-zone-label">Pure Optical Milk White</div>
+                                        </div>
+                                    </div>
+                                    <div class="color-readout-combo">
+                                        <span class="color-preview-circle" id="color-swatch-circle"></span>
+                                        <span class="sensor-readout" id="display-color">255</span>
                                     </div>
                                 </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="toggle-fat" checked>
-                                    <span class="slider round"></span>
-                                </label>
+                                <input type="range" class="tech-slider" id="slider-color" min="240" max="255" step="1" value="255">
+                                <div class="slider-ticks">
+                                    <span>Diluted / Off-White (240)</span>
+                                    <span>Standard Milk White</span>
+                                    <span class="tick-opt">Pure Reflectance (255)</span>
+                                </div>
                             </div>
 
-                            <!-- Turbidity Toggle -->
-                            <div class="toggle-card">
-                                <div class="toggle-info">
-                                    <span class="toggle-icon">🥛</span>
-                                    <div>
-                                        <div class="toggle-title">Turbidity (Cloudiness)</div>
-                                        <div class="toggle-sub" id="turb-subtext">Optimal Opacity (1)</div>
+                            <!-- Binary Switches: Fat & Turbidity -->
+                            <div class="binary-switches-grid">
+                                <!-- Switch 1: Fat Globules -->
+                                <div class="binary-toggle-card">
+                                    <div class="toggle-content">
+                                        <div class="toggle-icon">🧈</div>
+                                        <div>
+                                            <div class="toggle-name">Milkfat Presence</div>
+                                            <div class="toggle-status-text" id="status-fat">Intact Natural Fat (1)</div>
+                                        </div>
                                     </div>
+                                    <label class="switch-ui">
+                                        <input type="checkbox" id="check-fat" checked>
+                                        <span class="switch-slider"></span>
+                                    </label>
                                 </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="toggle-turb" checked>
-                                    <span class="slider round"></span>
-                                </label>
+
+                                <!-- Switch 2: Turbidity SNF -->
+                                <div class="binary-toggle-card">
+                                    <div class="toggle-content">
+                                        <div class="toggle-icon">🥛</div>
+                                        <div>
+                                            <div class="toggle-name">Colloidal Turbidity (SNF)</div>
+                                            <div class="toggle-status-text" id="status-turb">Intact Opacity / Dense (1)</div>
+                                        </div>
+                                    </div>
+                                    <label class="switch-ui">
+                                        <input type="checkbox" id="check-turb" checked>
+                                        <span class="switch-slider"></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
-                        <!-- Action Button -->
-                        <button class="btn-primary" id="btn-predict-now">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                            Run AI Diagnostics
-                        </button>
+                        <!-- Action Buttons Row -->
+                        <div class="bench-actions-row">
+                            <button class="btn-action-primary" id="btn-save-test">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                <span>Test & Record Sample to History</span>
+                            </button>
+                        </div>
                     </div>
 
-                    <!-- Right: Prediction Result & Diagnostic Panel -->
-                    <div class="glass-card results-card" id="results-container">
-                        <div class="card-header">
-                            <h2 class="card-title">Real-Time Classification Result</h2>
-                            <span class="badge-calibrated">96.70% Calibrated Model</span>
+                    <!-- Right Column: Live AI Forensic Diagnostic Card -->
+                    <div class="glass-panel diagnostics-panel">
+                        <div class="panel-header">
+                            <div>
+                                <h2 class="panel-title">Forensic AI Analysis & Verdict</h2>
+                                <p class="panel-subtitle">96.70% Calibrated Multi-Sensor Machine Learning Engine</p>
+                            </div>
+                            <span class="engine-badge">RF-96 Calibrated</span>
                         </div>
 
-                        <!-- Grade Display Banner -->
-                        <div class="grade-banner" id="grade-banner">
-                            <div class="grade-icon-wrapper" id="grade-icon">
-                                <span>🟡</span>
-                            </div>
-                            <div class="grade-details">
-                                <div class="grade-title-row">
-                                    <span class="grade-label-prefix">Predicted Quality:</span>
-                                    <span class="grade-main-text" id="grade-text">MEDIUM QUALITY</span>
-                                </div>
-                                <p class="grade-subtitle" id="grade-subtext">Standard / mild adulteration within manageable physical thresholds.</p>
-                            </div>
-                        </div>
-
-                        <!-- Confidence Probabilities -->
-                        <div class="probabilities-section">
-                            <h3 class="section-label">Adulteration Severity Probability</h3>
-                            <div class="prob-bar-group">
-                                <div class="prob-row">
-                                    <div class="prob-info">
-                                        <span class="prob-name">Medium Grade (Mild / Standard Quality)</span>
-                                        <span class="prob-pct" id="pct-medium">92.5%</span>
-                                    </div>
-                                    <div class="prob-track">
-                                        <div class="prob-fill fill-medium" id="bar-medium" style="width: 92.5%;"></div>
-                                    </div>
-                                </div>
-
-                                <div class="prob-row">
-                                    <div class="prob-info">
-                                        <span class="prob-name">Low Grade (Severe Adulteration / Spoilage)</span>
-                                        <span class="prob-pct" id="pct-low">7.5%</span>
-                                    </div>
-                                    <div class="prob-track">
-                                        <div class="prob-fill fill-low" id="bar-low" style="width: 7.5%;"></div>
-                                    </div>
+                        <!-- Animated Speedometer / Quality Dial Gauge -->
+                        <div class="quality-gauge-card">
+                            <div class="gauge-wrapper">
+                                <svg viewBox="0 0 200 120" class="gauge-svg">
+                                    <!-- Background Arc -->
+                                    <path d="M 20 100 A 80 80 0 0 1 180 100" class="gauge-bg-arc" />
+                                    <!-- Animated Value Arc -->
+                                    <path d="M 20 100 A 80 80 0 0 1 180 100" class="gauge-value-arc" id="gauge-arc-fill" />
+                                    <!-- Needle Indicator -->
+                                    <g id="gauge-needle-group" transform="rotate(45, 100, 100)">
+                                        <line x1="100" y1="100" x2="30" y2="100" class="gauge-needle" />
+                                        <circle cx="100" cy="100" r="7" class="gauge-needle-pivot" />
+                                    </g>
+                                </svg>
+                                <div class="gauge-score-overlay">
+                                    <div class="score-number" id="gauge-score-value">96%</div>
+                                    <div class="score-label">Quality Index</div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Adulterant Chemical Diagnosis -->
-                        <div class="diagnosis-section">
-                            <h3 class="section-label">Chemical & Physical Sensor Diagnosis</h3>
-                            <div class="diagnosis-box" id="diagnosis-container">
-                                <div class="diag-item success">
-                                    <span class="diag-bullet">✓</span>
-                                    <div>
-                                        <div class="diag-title">Pure Biological Baseline</div>
-                                        <div class="diag-text">pH, Temperature, Fat, Turbidity, and Color are within verified healthy parameters.</div>
-                                    </div>
+                        <!-- Grade Verdict Banner -->
+                        <div class="verdict-banner grade-medium" id="verdict-banner">
+                            <div class="verdict-icon-box" id="verdict-icon">
+                                <span>🛡️</span>
+                            </div>
+                            <div class="verdict-body">
+                                <div class="verdict-meta">AI Classification Verdict:</div>
+                                <div class="verdict-title" id="verdict-title">MEDIUM QUALITY (MILD / ACCEPTABLE)</div>
+                                <div class="verdict-desc" id="verdict-desc">Colloidal solids, fat globules, and optical density are preserved within managed parameters.</div>
+                            </div>
+                        </div>
+
+                        <!-- Confidence Probability Dual Bars -->
+                        <div class="probability-card">
+                            <div class="prob-header">
+                                <span class="prob-title">Adulteration Severity Probability</span>
+                                <span class="prob-info-tag">Stratified 5-Fold Validated</span>
+                            </div>
+
+                            <!-- Medium Grade Probability -->
+                            <div class="prob-item">
+                                <div class="prob-label-row">
+                                    <span class="prob-name">Medium Grade (Standard / Mild Adulteration)</span>
+                                    <span class="prob-val" id="prob-medium-val">96.2%</span>
+                                </div>
+                                <div class="prob-bar-rail">
+                                    <div class="prob-bar-fill fill-medium" id="prob-medium-bar" style="width: 96.2%;"></div>
+                                </div>
+                            </div>
+
+                            <!-- Low Grade Probability -->
+                            <div class="prob-item">
+                                <div class="prob-label-row">
+                                    <span class="prob-name">Low Grade (Severe Adulteration / Spoilage)</span>
+                                    <span class="prob-val" id="prob-low-val">3.8%</span>
+                                </div>
+                                <div class="prob-bar-rail">
+                                    <div class="prob-bar-fill fill-low" id="prob-low-bar" style="width: 3.8%;"></div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Diagnostic Tags -->
-                        <div class="adulterant-tag-wrapper">
-                            <span class="tag-label">Detected Adulterant Profile:</span>
-                            <span class="adulterant-tag" id="adulterant-tag">None (Pure Milk)</span>
+                        <!-- Detected Adulterant Category Pill -->
+                        <div class="adulterant-pill-card">
+                            <span class="adulterant-pill-label">Detected Adulterant Profile:</span>
+                            <span class="adulterant-pill-badge" id="adulterant-verdict-badge">None (Pure Milk)</span>
+                        </div>
+
+                        <!-- Sensor Forensic Checklist -->
+                        <div class="diagnostic-checklist-card">
+                            <div class="checklist-header">Chemical & Physical Sensor Health Check</div>
+                            <div class="checklist-items" id="diagnosis-checklist">
+                                <!-- Populated dynamically via JS -->
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+
+            <!-- ======================================================== -->
+            <!-- TAB 2: TESTED SAMPLES HISTORY (DEDICATED VIEW)            -->
+            <!-- ======================================================== -->
+            <section class="tab-view" id="tab-history">
+                <div class="history-view-wrapper">
+                    
+                    <!-- KPI Analytics Cards Header -->
+                    <div class="history-kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrapper kpi-blue">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                            </div>
+                            <div class="kpi-data">
+                                <div class="kpi-value" id="kpi-total-tested">0</div>
+                                <div class="kpi-label">Total Tested Samples</div>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrapper kpi-emerald">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            </div>
+                            <div class="kpi-data">
+                                <div class="kpi-value text-emerald" id="kpi-medium-count">0</div>
+                                <div class="kpi-label">Standard / Mild Quality</div>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrapper kpi-rose">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            </div>
+                            <div class="kpi-data">
+                                <div class="kpi-value text-rose" id="kpi-low-count">0</div>
+                                <div class="kpi-label">Severe Adulteration (Violations)</div>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrapper kpi-amber">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            </div>
+                            <div class="kpi-data">
+                                <div class="kpi-value text-amber" id="kpi-adulteration-rate">0.0%</div>
+                                <div class="kpi-label">Adulteration Rate</div>
+                            </div>
+                        </div>
+
+                        <div class="kpi-card">
+                            <div class="kpi-icon-wrapper kpi-cyan">
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                            </div>
+                            <div class="kpi-data">
+                                <div class="kpi-value text-cyan" id="kpi-avg-metrics">6.7 pH • 38°C</div>
+                                <div class="kpi-label">Batch Average pH & Temp</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- History Search & Filter Control Bar -->
+                    <div class="glass-panel history-table-panel">
+                        <div class="history-controls-bar">
+                            <div class="history-search-box">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" id="history-search-input" placeholder="Search by sample name, notes, or adulterant...">
+                            </div>
+
+                            <div class="history-filter-pills">
+                                <button class="filter-pill active" data-filter="all">All Samples</button>
+                                <button class="filter-pill" data-filter="medium">Medium Only</button>
+                                <button class="filter-pill" data-filter="low">Low (Adulterated)</button>
+                            </div>
+
+                            <div class="history-actions-group">
+                                <a href="/api/history/export/csv" class="btn-action-outline" id="btn-export-csv" download title="Download sample records as CSV">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Export CSV
+                                </a>
+                                <button class="btn-action-outline btn-danger-outline" id="btn-clear-history" title="Clear tested samples history">
+                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    Clear History
+                                </button>
+                                <button class="btn-icon" id="btn-refresh-history" title="Refresh Table">🔄</button>
+                            </div>
+                        </div>
+
+                        <!-- Tested Samples Data Table -->
+                        <div class="table-responsive-wrapper">
+                            <table class="lab-history-table">
+                                <thead>
+                                    <tr>
+                                        <th># ID</th>
+                                        <th>Sample Details</th>
+                                        <th>Date & Time</th>
+                                        <th>Physical Sensors</th>
+                                        <th>AI Quality Grade</th>
+                                        <th>Confidence</th>
+                                        <th>Chemical Adulterant</th>
+                                        <th>Test Source</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="history-table-tbody">
+                                    <!-- Populated dynamically via JS -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Empty State Notice (if no records) -->
+                        <div class="empty-history-state hidden" id="history-empty-state">
+                            <div class="empty-icon">🥛</div>
+                            <div class="empty-title">No Milk Samples Recorded Yet</div>
+                            <p class="empty-desc">Run a test on the Lab Testing Bench or click any scenario preset to log your first verified sample.</p>
+                            <button class="btn-action-primary" id="btn-empty-goto-bench">Go to Testing Bench</button>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- TAB 2: DAIRY SCENARIO PRESETS -->
-            <section class="tab-pane" id="presets-tab">
-                <div class="glass-card">
-                    <div class="card-header">
-                        <h2 class="card-title">Real-World Dairy Adulteration Scenarios</h2>
+            <!-- ======================================================== -->
+            <!-- TAB 3: DAIRY SCENARIO PRESETS                            -->
+            <!-- ======================================================== -->
+            <section class="tab-view" id="tab-presets">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2 class="panel-title">Real-World Dairy Adulteration Scenarios</h2>
+                            <p class="panel-subtitle">Instant real-world milk tampering samples for academic and laboratory demonstrations</p>
+                        </div>
                     </div>
-                    <p class="card-desc">Click any preset scenario below to instantly populate the sensor controls and demonstrate detection to professors or examiners.</p>
 
-                    <div class="presets-grid" id="presets-grid">
+                    <div class="presets-modern-grid" id="presets-modern-grid">
                         <!-- Populated dynamically via JS -->
                     </div>
                 </div>
             </section>
 
-            <!-- TAB 3: ESP32 HARDWARE STREAM -->
-            <section class="tab-pane" id="telemetry-tab">
-                <div class="glass-card">
-                    <div class="card-header">
-                        <h2 class="card-title">Live ESP32 Hardware Stream</h2>
-                        <span class="pulse-indicator">
-                            <span class="pulse-dot"></span>
-                            HTTP Listener Active (:5000/api/esp32/telemetry)
-                        </span>
+            <!-- ======================================================== -->
+            <!-- TAB 4: ESP32 HARDWARE STREAM                             -->
+            <!-- ======================================================== -->
+            <section class="tab-view" id="tab-telemetry">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2 class="panel-title">Live ESP32 Hardware IoT Stream</h2>
+                            <p class="panel-subtitle">Wireless telemetry over Wi-Fi (<code>/api/esp32/telemetry</code>) or offline USB Serial Bridge</p>
+                        </div>
+                        <div class="stream-actions">
+                            <button class="btn-action-outline" id="btn-simulate-esp32">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                Simulate Incoming IoT Packet
+                            </button>
+                        </div>
                     </div>
-                    <p class="card-desc">When your physical ESP32 connects to WiFi, it sends HTTP POST packets with sensor readings. Live data will display below in real-time.</p>
 
-                    <div class="telemetry-feed-container">
-                        <table class="telemetry-table">
+                    <div class="hardware-info-row">
+                        <div class="hw-spec-card">
+                            <div class="hw-spec-icon">📶</div>
+                            <div>
+                                <div class="hw-spec-name">Wi-Fi HTTP Endpoint</div>
+                                <div class="hw-spec-val"><code>POST /api/esp32/telemetry</code></div>
+                            </div>
+                        </div>
+                        <div class="hw-spec-card">
+                            <div class="hw-spec-icon">🔌</div>
+                            <div>
+                                <div class="hw-spec-name">Serial Bridge</div>
+                                <div class="hw-spec-val"><code>python src/serial_bridge.py</code></div>
+                            </div>
+                        </div>
+                        <div class="hw-spec-card">
+                            <div class="hw-spec-icon">⚡</div>
+                            <div>
+                                <div class="hw-spec-name">On-Chip C Engine</div>
+                                <div class="hw-spec-val"><code>esp32_firmware/milk_model.h</code> (&lt;0.1 ms)</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive-wrapper" style="margin-top: 1.5rem;">
+                        <table class="lab-history-table">
                             <thead>
                                 <tr>
                                     <th>Timestamp</th>
-                                    <th>Device ID</th>
+                                    <th>Microcontroller ID</th>
                                     <th>Temp (°C)</th>
                                     <th>pH</th>
                                     <th>Fat</th>
                                     <th>Turbidity</th>
                                     <th>Color</th>
                                     <th>AI Grade</th>
-                                    <th>Adulteration Verdict</th>
+                                    <th>Adulterant Profile</th>
                                 </tr>
                             </thead>
-                            <tbody id="telemetry-tbody">
+                            <tbody id="telemetry-table-body">
                                 <tr>
-                                    <td colspan="9" class="empty-state">No live ESP32 packets received yet. Turn on your ESP32 or test using the Interactive Analyzer tab.</td>
+                                    <td colspan="9" class="empty-state-cell">No live ESP32 packets received yet. Power on your ESP32 or click "Simulate Incoming IoT Packet".</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -297,56 +528,60 @@
                 </div>
             </section>
 
-            <!-- TAB 4: MODEL INTELLIGENCE & METRICS -->
-            <section class="tab-pane" id="model-tab">
-                <div class="glass-card">
-                    <div class="card-header">
-                        <h2 class="card-title">Model Validation & Architecture Details</h2>
-                        <span class="badge-calibrated">96.70% Test Accuracy</span>
+            <!-- ======================================================== -->
+            <!-- TAB 5: AI MODEL INTELLIGENCE & EDA                       -->
+            <!-- ======================================================== -->
+            <section class="tab-view" id="tab-model">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2 class="panel-title">Model Architecture & Empirical Validation</h2>
+                            <p class="panel-subtitle">Calibrated Regularized Random Forest (Defensible academic accuracy without 99% overfitting)</p>
+                        </div>
+                        <span class="engine-badge">96.70% Test Accuracy</span>
                     </div>
-                    
-                    <div class="metrics-summary-grid">
-                        <div class="stat-card">
-                            <div class="stat-num">96.70%</div>
-                            <div class="stat-name">Holdout Test Accuracy</div>
-                            <div class="stat-sub">Unseen 20% test samples</div>
+
+                    <!-- Metrics Stats Grid -->
+                    <div class="model-stats-grid">
+                        <div class="metric-glass-card">
+                            <div class="metric-num">96.70%</div>
+                            <div class="metric-title">Holdout Test Accuracy</div>
+                            <div class="metric-sub">Evaluated on unseen 20% test samples</div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-num">94.81%</div>
-                            <div class="stat-name">5-Fold Stratified CV</div>
-                            <div class="stat-sub">Strict k-fold generalization</div>
+                        <div class="metric-glass-card">
+                            <div class="metric-num">94.81%</div>
+                            <div class="metric-title">5-Fold Stratified CV</div>
+                            <div class="metric-sub">Standard deviation: ±0.98%</div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-num">0.9525</div>
-                            <div class="stat-name">Macro F1-Score</div>
-                            <div class="stat-sub">Balanced precision/recall</div>
+                        <div class="metric-glass-card">
+                            <div class="metric-num">0.9525</div>
+                            <div class="metric-title">Macro F1-Score</div>
+                            <div class="metric-sub">Harmonic mean of precision & recall</div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-num">&lt; 0.1 ms</div>
-                            <div class="stat-name">ESP32 Inference Time</div>
-                            <div class="stat-sub">Embedded pure C decision tree</div>
+                        <div class="metric-glass-card">
+                            <div class="metric-num">&lt; 0.1 ms</div>
+                            <div class="metric-title">Embedded Inference Time</div>
+                            <div class="metric-sub">Instant decision tree on ESP32 chip</div>
                         </div>
                     </div>
 
-                    <div class="charts-split-grid">
-                        <div class="chart-card">
-                            <h3 class="chart-title">Confusion Matrix (96.70% Test Set)</h3>
-                            <img src="/reports/figures/calibration_confusion_matrix.png" alt="Confusion Matrix" class="responsive-chart-img">
+                    <!-- Figures 2x2 Grid -->
+                    <div class="figures-2x2-grid">
+                        <div class="figure-container-card">
+                            <h3 class="figure-title">Confusion Matrix (96.70% Holdout Test Split)</h3>
+                            <img src="/reports/figures/calibration_confusion_matrix.png" alt="Confusion Matrix" class="figure-img">
                         </div>
-                        <div class="chart-card">
-                            <h3 class="chart-title">Sensor Feature Importance (MDI)</h3>
-                            <img src="/reports/figures/calibration_feature_importance.png" alt="Feature Importance" class="responsive-chart-img">
+                        <div class="figure-container-card">
+                            <h3 class="figure-title">Feature Importance (Gini Impurity MDI)</h3>
+                            <img src="/reports/figures/calibration_feature_importance.png" alt="Feature Importance" class="figure-img">
                         </div>
-                    </div>
-
-                    <div class="charts-split-grid" style="margin-top: 1.5rem;">
-                        <div class="chart-card">
-                            <h3 class="chart-title">Class Distribution & Mutual Information (EDA)</h3>
-                            <img src="/reports/figures/eda_calibration_class_distribution.png" alt="Class Distribution" class="responsive-chart-img">
+                        <div class="figure-container-card">
+                            <h3 class="figure-title">EDA Class Distribution (milk_calibration_final.csv)</h3>
+                            <img src="/reports/figures/eda_calibration_class_distribution.png" alt="Class Distribution" class="figure-img">
                         </div>
-                        <div class="chart-card">
-                            <h3 class="chart-title">Sensor Decision Space (pH vs Temperature)</h3>
-                            <img src="/reports/figures/eda_calibration_sensor_decision_plane.png" alt="Sensor Decision Plane" class="responsive-chart-img">
+                        <div class="figure-container-card">
+                            <h3 class="figure-title">Physical Decision Boundary (pH vs. Temperature)</h3>
+                            <img src="/reports/figures/eda_calibration_sensor_decision_plane.png" alt="Decision Boundary" class="figure-img">
                         </div>
                     </div>
                 </div>
@@ -354,13 +589,39 @@
 
         </main>
 
+        <!-- Forensic Sample Inspection Modal -->
+        <div class="modal-backdrop hidden" id="sample-modal">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <div>
+                        <h3 class="modal-title" id="modal-sample-title">Sample Details</h3>
+                        <div class="modal-subtitle" id="modal-sample-subtitle">Sample #000 • Timestamp</div>
+                    </div>
+                    <button class="modal-close-btn" id="btn-close-modal">✕</button>
+                </div>
+                <div class="modal-body" id="modal-sample-body">
+                    <!-- Populated dynamically via JS -->
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-action-outline" id="btn-modal-load">Load into Testing Bench</button>
+                    <button class="btn-action-primary" id="btn-modal-close-ok">Done</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Toast Container -->
+        <div class="toast-container" id="toast-container"></div>
+
         <!-- Footer -->
         <footer class="app-footer">
-            <p>MilkShield AI • Major Project: ESP32 IoT Milk Quality & Adulteration Detection System • Connected & Calibrated at 96.70% Accuracy</p>
+            <div class="footer-content">
+                <div>MilkShield AI • IoT & Edge AI Milk Adulteration Detection System</div>
+                <div class="footer-meta">Dataset: <code>milk_calibration_final.csv</code> • Calibrated Accuracy: 96.70% • Persistent SQLite Storage Active</div>
+            </div>
         </footer>
     </div>
 
-    <!-- Vanilla JS Application -->
+    <!-- Application Script -->
     <script src="/static/js/app.js"></script>
 </body>
 </html>

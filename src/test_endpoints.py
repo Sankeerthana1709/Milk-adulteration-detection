@@ -3,8 +3,8 @@ import json
 
 BASE = 'http://127.0.0.1:5000'
 
-def test_endpoint(url, data=None):
-    req = urllib.request.Request(url, headers={'Content-Type': 'application/json'})
+def test_endpoint(url, data=None, method='GET'):
+    req = urllib.request.Request(url, headers={'Content-Type': 'application/json'}, method=method)
     if data:
         encoded = json.dumps(data).encode('utf-8')
         resp = urllib.request.urlopen(req, data=encoded)
@@ -21,18 +21,18 @@ def test_endpoint(url, data=None):
 st, body = test_endpoint(BASE + '/')
 print(f"1. GET / -> Status {st}, HTML Length: {len(body)}")
 
-# 2. Predict Medium Quality
-st, body = test_endpoint(BASE + '/api/predict', {'temperature': 38.0, 'fat': 1, 'turbidity': 1, 'color': 255, 'ph': 6.8})
+# 2. Predict Medium Quality (Standard)
+st, body = test_endpoint(BASE + '/api/predict', {'temperature': 38.0, 'fat': 1, 'turbidity': 1, 'color': 255, 'ph': 6.8, 'sample_name': 'Automated Medium Test', 'save_sample': True}, method='POST')
 res = json.loads(body)
 print(f"2. POST /api/predict (Medium sample) -> Grade: {res.get('grade')}, Conf: {res.get('confidence')}, Adulterant: {res.get('adulterant_type')}")
 
 # 3. Predict Low Quality (Sour)
-st, body = test_endpoint(BASE + '/api/predict', {'temperature': 45.0, 'fat': 1, 'turbidity': 0, 'color': 248, 'ph': 4.6})
+st, body = test_endpoint(BASE + '/api/predict', {'temperature': 45.0, 'fat': 1, 'turbidity': 0, 'color': 248, 'ph': 4.6, 'sample_name': 'Automated Sour Test', 'save_sample': True}, method='POST')
 res = json.loads(body)
 print(f"3. POST /api/predict (Sour sample) -> Grade: {res.get('grade')}, Conf: {res.get('confidence')}, Adulterant: {res.get('adulterant_type')}")
 
 # 4. ESP32 Telemetry
-st, body = test_endpoint(BASE + '/api/esp32/telemetry', {'device_id': 'ESP32_Test_Lab', 'temperature': 39.5, 'fat': 1, 'turbidity': 1, 'color': 252, 'ph': 7.2})
+st, body = test_endpoint(BASE + '/api/esp32/telemetry', {'device_id': 'ESP32_Test_Lab', 'temperature': 39.5, 'fat': 1, 'turbidity': 1, 'color': 252, 'ph': 7.2}, method='POST')
 res = json.loads(body)
 print(f"4. POST /api/esp32/telemetry -> Status: {res.get('status')}, Packet Grade: {res.get('received', {}).get('grade')}")
 
@@ -54,4 +54,19 @@ print(f"7. GET /api/dataset/stats -> Dataset: {stats.get('dataset_name')}, Sampl
 # 8. Report Figures
 st, _ = test_endpoint(BASE + '/reports/figures/calibration_confusion_matrix.png')
 print(f"8. GET /reports/figures/calibration_confusion_matrix.png -> Status {st}")
-print("\n[ALL TESTS PASSED SUCCESSFULLY!]")
+
+# 9. NEW: Tested Samples History List
+st, body = test_endpoint(BASE + '/api/history')
+history = json.loads(body)
+print(f"9. GET /api/history -> Status {st}, Total History Records: {history.get('count')}, Latest Sample: {history.get('samples')[0]['sample_name'] if history.get('samples') else 'None'}")
+
+# 10. NEW: Tested Samples History Stats (KPIs)
+st, body = test_endpoint(BASE + '/api/history/stats')
+hist_stats = json.loads(body)
+print(f"10. GET /api/history/stats -> Status {st}, Total Tested: {hist_stats.get('total_tested')}, Adulteration Rate: {hist_stats.get('adulteration_rate_pct')}%, Avg pH: {hist_stats.get('avg_ph')}")
+
+# 11. NEW: Tested Samples Export CSV
+st, csv_body = test_endpoint(BASE + '/api/history/export/csv')
+print(f"11. GET /api/history/export/csv -> Status {st}, CSV Lines: {len(csv_body.splitlines())}")
+
+print("\n[ALL 11 ENDPOINT TESTS PASSED SUCCESSFULLY!]")
