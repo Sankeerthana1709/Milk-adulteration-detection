@@ -1,7 +1,7 @@
 /**
- * MilkShield AI - Quantum Dairy Tech Client Application
- * Handles real-time interactive predictions, SVG speedometer gauge animations,
- * SQLite sample history viewing & forensic inspection, presets, and ESP32 telemetry.
+ * MilkShield AI - Clean Laboratory Client Application
+ * Uses normal direct inputs, real-time ML diagnosis, SQLite test history,
+ * presets, and live ESP32 IoT telemetry.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -17,35 +17,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const headerSampleCount = document.getElementById('header-sample-count');
     const tabHistoryCount = document.getElementById('tab-history-count');
 
-    // Workbench Inputs
+    // Normal Input Fields
     const inputSampleName = document.getElementById('input-sample-name');
     const btnGenerateName = document.getElementById('btn-generate-name');
     const inputSampleNotes = document.getElementById('input-sample-notes');
-    const sliderTemp = document.getElementById('slider-temp');
-    const sliderPh = document.getElementById('slider-ph');
-    const sliderColor = document.getElementById('slider-color');
-    const checkFat = document.getElementById('check-fat');
-    const checkTurb = document.getElementById('check-turb');
 
-    // Readouts
-    const displayTemp = document.getElementById('display-temp');
-    const displayPh = document.getElementById('display-ph');
-    const displayColor = document.getElementById('display-color');
-    const colorSwatchCircle = document.getElementById('color-swatch-circle');
-    const statusFat = document.getElementById('status-fat');
-    const statusTurb = document.getElementById('status-turb');
-    const tempZoneLabel = document.getElementById('temp-zone-label');
-    const phZoneLabel = document.getElementById('ph-zone-label');
-    const colorZoneLabel = document.getElementById('color-zone-label');
+    const inputTemp = document.getElementById('input-temp');
+    const inputPh = document.getElementById('input-ph');
+    const inputColor = document.getElementById('input-color');
+    const selectFat = document.getElementById('select-fat');
+    const selectTurb = document.getElementById('select-turb');
 
-    // Bench Action Buttons
+    const guideTemp = document.getElementById('guide-temp');
+    const guidePh = document.getElementById('guide-ph');
+    const colorDot = document.getElementById('color-dot');
+
     const btnResetBench = document.getElementById('btn-reset-bench');
     const btnSaveTest = document.getElementById('btn-save-test');
 
     // Diagnostic Results
-    const gaugeScoreValue = document.getElementById('gauge-score-value');
-    const gaugeArcFill = document.getElementById('gauge-arc-fill');
-    const gaugeNeedleGroup = document.getElementById('gauge-needle-group');
     const verdictBanner = document.getElementById('verdict-banner');
     const verdictIcon = document.getElementById('verdict-icon');
     const verdictTitle = document.getElementById('verdict-title');
@@ -64,14 +54,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const kpiAdulterationRate = document.getElementById('kpi-adulteration-rate');
     const kpiAvgMetrics = document.getElementById('kpi-avg-metrics');
     const historySearchInput = document.getElementById('history-search-input');
-    const filterPills = document.querySelectorAll('.filter-pill');
+    const filterButtons = document.querySelectorAll('.filter-btn');
     const historyTableTbody = document.getElementById('history-table-tbody');
     const historyEmptyState = document.getElementById('history-empty-state');
     const btnClearHistory = document.getElementById('btn-clear-history');
     const btnRefreshHistory = document.getElementById('btn-refresh-history');
 
     // Presets & Telemetry
-    const presetsModernGrid = document.getElementById('presets-modern-grid');
+    const presetsCleanGrid = document.getElementById('presets-clean-grid');
     const btnSimulateEsp32 = document.getElementById('btn-simulate-esp32');
     const telemetryTableBody = document.getElementById('telemetry-table-body');
     const esp32Dot = document.getElementById('esp32-dot');
@@ -139,41 +129,47 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =========================================================================
-    // 2. WORKBENCH SLIDERS & LIVE PREDICTION
+    // 2. NORMAL INPUTS & REAL-TIME VALIDATION
     // =========================================================================
-    function updateBenchUI(triggerPrediction = true) {
-        const temp = parseFloat(sliderTemp.value).toFixed(1);
-        const ph = parseFloat(sliderPh.value).toFixed(2);
-        const color = parseInt(sliderColor.value, 10);
-        const fat = checkFat.checked;
-        const turb = checkTurb.checked;
+    function updateNormalInputsUI(triggerPrediction = true) {
+        const temp = parseFloat(inputTemp.value) || 36.5;
+        const ph = parseFloat(inputPh.value) || 6.70;
+        const color = parseInt(inputColor.value, 10) || 255;
 
-        // Numeric Readouts
-        displayTemp.textContent = `${temp} °C`;
-        displayPh.textContent = `${ph} pH`;
-        displayColor.textContent = `${color}`;
+        // Temperature Guide Text
+        if (temp < 35.0) {
+            guideTemp.textContent = 'Chilled holding temperature (<35.0°C)';
+            guideTemp.style.color = '#0284c7';
+        } else if (temp <= 38.5) {
+            guideTemp.textContent = 'Optimal fresh whole milk range (35.0 - 38.5°C)';
+            guideTemp.style.color = '#059669';
+        } else if (temp <= 62.0) {
+            guideTemp.textContent = 'Warning: Warm storage spoilage zone (39.0 - 62.0°C)';
+            guideTemp.style.color = '#d97706';
+        } else {
+            guideTemp.textContent = 'Pasteurization / Boiled milk range (>63.0°C)';
+            guideTemp.style.color = '#dc2626';
+        }
 
-        // Color Swatch Circle (240 is off-white, 255 pure milk white)
-        const intensity = Math.round(220 + ((color - 240) / 15) * 35);
-        colorSwatchCircle.style.backgroundColor = `rgb(${intensity}, ${intensity}, ${intensity})`;
+        // pH Guide Text
+        if (ph < 6.0) {
+            guidePh.textContent = 'Acidic Spoilage: High bacterial lactic acid or acid preservative (<6.0 pH)';
+            guidePh.style.color = '#dc2626';
+        } else if (ph <= 6.85) {
+            guidePh.textContent = 'Pure Fresh Milk: Normal physiological baseline (6.50 - 6.80 pH)';
+            guidePh.style.color = '#059669';
+        } else if (ph <= 7.8) {
+            guidePh.textContent = 'Alkaline Buffer: Suspected added urea or sodium bicarbonate (7.0 - 7.8 pH)';
+            guidePh.style.color = '#d97706';
+        } else {
+            guidePh.textContent = 'Severe Neutralizer: Caustic soda or detergent wash (>7.8 pH)';
+            guidePh.style.color = '#dc2626';
+        }
 
-        // Binary status text
-        statusFat.textContent = fat ? 'Intact Natural Fat (1)' : 'Depleted / Skimmed (0)';
-        statusTurb.textContent = turb ? 'Intact Opacity / Dense (1)' : 'Watery / Diluted (0)';
-
-        // Zone labels
-        if (temp < 35.0) tempZoneLabel.textContent = 'Chilled Holding (<35°C)';
-        else if (temp <= 38.0) tempZoneLabel.textContent = 'Ideal Fresh Milk (35°C - 38°C)';
-        else if (temp <= 62.0) tempZoneLabel.textContent = 'Danger Warm Spoilage (39°C - 62°C)';
-        else tempZoneLabel.textContent = 'Pasteurization / Boiled (>63°C)';
-
-        if (ph < 6.0) phZoneLabel.textContent = 'Acidic Spoilage / Souring (<6.0 pH)';
-        else if (ph <= 6.9) phZoneLabel.textContent = 'Normal Fresh Whole Milk (6.5 - 6.8 pH)';
-        else if (ph <= 7.8) phZoneLabel.textContent = 'Mild Alkaline Buffer (7.0 - 7.8 pH)';
-        else phZoneLabel.textContent = 'Strong Caustic Soda / Detergent (>7.8 pH)';
-
-        if (color < 246) colorZoneLabel.textContent = 'Reduced Opacity (Watery Dilution)';
-        else colorZoneLabel.textContent = 'Pure Optical Milk Reflectance';
+        // Color indicator dot
+        const clampedColor = Math.min(255, Math.max(200, color));
+        const intensity = Math.round(200 + ((clampedColor - 200) / 55) * 55);
+        colorDot.style.backgroundColor = `rgb(${intensity}, ${intensity}, ${intensity})`;
 
         if (triggerPrediction) {
             clearTimeout(liveDebounceTimer);
@@ -183,43 +179,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    sliderTemp.addEventListener('input', () => updateBenchUI(true));
-    sliderPh.addEventListener('input', () => updateBenchUI(true));
-    sliderColor.addEventListener('input', () => updateBenchUI(true));
-    checkFat.addEventListener('change', () => updateBenchUI(true));
-    checkTurb.addEventListener('change', () => updateBenchUI(true));
+    inputTemp.addEventListener('input', () => updateNormalInputsUI(true));
+    inputPh.addEventListener('input', () => updateNormalInputsUI(true));
+    inputColor.addEventListener('input', () => updateNormalInputsUI(true));
+    selectFat.addEventListener('change', () => updateNormalInputsUI(true));
+    selectTurb.addEventListener('change', () => updateNormalInputsUI(true));
 
     // Reset Defaults
     btnResetBench.addEventListener('click', () => {
-        sliderTemp.value = 36.5;
-        sliderPh.value = 6.70;
-        sliderColor.value = 255;
-        checkFat.checked = true;
-        checkTurb.checked = true;
+        inputTemp.value = 36.5;
+        inputPh.value = 6.70;
+        inputColor.value = 255;
+        selectFat.value = "1";
+        selectTurb.value = "1";
         inputSampleName.value = `Sample #${sampleCounter}`;
-        inputSampleNotes.value = 'Fresh whole milk baseline';
-        updateBenchUI(true);
-        showToast('Reset testing bench to clean whole milk standards.');
+        inputSampleNotes.value = 'Pure whole milk baseline test';
+        updateNormalInputsUI(true);
+        showToast('Reset testing form to fresh whole milk defaults.');
     });
 
     // Auto-generate sample name
     btnGenerateName.addEventListener('click', () => {
         sampleCounter += 1;
-        const prefixes = ['Cow Milk Batch', 'Chilled Delivery', 'Dairy Tanker', 'Retail Sample', 'Farm Fresh Batch'];
+        const prefixes = ['Cow Milk Sample', 'Dairy Tanker Delivery', 'Retail Milk Pouch', 'Morning Chilling Batch', 'Lab Inspection Batch'];
         const p = prefixes[Math.floor(Math.random() * prefixes.length)];
         inputSampleName.value = `${p} #${sampleCounter}`;
     });
 
     // =========================================================================
-    // 3. PREDICTION ENGINE & GAUGE ANIMATION
+    // 3. PREDICTION & DIAGNOSTIC VERDICT
     // =========================================================================
     async function runPrediction(saveToHistory = false) {
         const payload = {
-            temperature: parseFloat(sliderTemp.value),
-            fat: checkFat.checked ? 1 : 0,
-            turbidity: checkTurb.checked ? 1 : 0,
-            color: parseInt(sliderColor.value, 10),
-            ph: parseFloat(sliderPh.value),
+            temperature: parseFloat(inputTemp.value) || 36.5,
+            fat: parseInt(selectFat.value, 10),
+            turbidity: parseInt(selectTurb.value, 10),
+            color: parseInt(inputColor.value, 10) || 255,
+            ph: parseFloat(inputPh.value) || 6.70,
             sample_name: inputSampleName.value.trim() || `Sample #${sampleCounter}`,
             notes: inputSampleNotes.value.trim() || '',
             source: 'Interactive Lab Test',
@@ -233,9 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(payload)
             });
 
-            if (!res.ok) throw new Error('API request failed');
+            if (!res.ok) throw new Error('Prediction API failed');
             const data = await res.json();
-            renderPredictionResults(data, saveToHistory);
+            renderPredictionResults(data);
 
             if (saveToHistory) {
                 showToast(`Recorded "${payload.sample_name}" into Lab History!`);
@@ -249,7 +245,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function renderPredictionResults(data, wasSaved) {
+    function renderPredictionResults(data) {
         const grade = data.grade;
         const conf = data.confidence || { medium: 50, low: 50 };
         const medPct = conf.medium || 0;
@@ -257,61 +253,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const warnings = data.warnings || [];
         const adulterant = data.adulterant_type || 'None';
 
-        // 1. Gauge Needle & Score Animation
-        // Scale needle from -90deg (Low/Adulterated) to +90deg (Medium/Clean)
-        // Quality Score index: 0% to 100%
-        let qualityScore = medPct;
-        if (grade === 'Low') {
-            qualityScore = Math.max(5, Math.round(100 - lowPct));
-        } else {
-            qualityScore = Math.min(99, Math.round(medPct));
-        }
-
-        gaugeScoreValue.textContent = `${qualityScore}%`;
-        
-        // Needle angle: score 0 => -90 deg, score 100 => +90 deg
-        const needleAngle = -90 + (qualityScore / 100) * 180;
-        gaugeNeedleGroup.style.transform = `rotate(${needleAngle}deg)`;
-
-        // Arc dashoffset: 251.2 is empty, 0 is full
-        const arcOffset = 251.2 - (qualityScore / 100) * 251.2;
-        gaugeArcFill.style.strokeDashoffset = arcOffset;
-
-        if (grade === 'Medium') {
-            gaugeArcFill.style.stroke = qualityScore > 75 ? '#34d399' : '#f59e0b';
-        } else {
-            gaugeArcFill.style.stroke = '#f43f5e';
-        }
-
-        // 2. Verdict Banner
+        // Verdict Banner
         verdictBanner.className = `verdict-banner ${grade === 'Medium' ? 'grade-medium' : 'grade-low'}`;
         if (grade === 'Medium') {
             verdictIcon.innerHTML = '<span>🛡️</span>';
             verdictTitle.textContent = 'MEDIUM QUALITY (MILD / ACCEPTABLE)';
-            verdictDesc.textContent = 'Natural fat globules, colloidal turbidity, and pH are within manageable dairy bounds.';
+            verdictDesc.textContent = 'Standard whole milk: Milkfat globules, colloidal opacity, and pH balance are within acceptable limits.';
         } else {
             verdictIcon.innerHTML = '<span>⚠️</span>';
             verdictTitle.textContent = 'LOW QUALITY (SEVERE ADULTERATION / SPOILAGE)';
             verdictDesc.textContent = 'Critical violation: Chemical neutralizer, extreme dilution, or bacterial spoilage detected!';
         }
 
-        // 3. Dual Probability Bars
+        // Probability Bars
         probMediumVal.textContent = `${medPct.toFixed(1)}%`;
         probMediumBar.style.width = `${medPct}%`;
 
         probLowVal.textContent = `${lowPct.toFixed(1)}%`;
         probLowBar.style.width = `${lowPct}%`;
 
-        // 4. Adulterant Badge
+        // Adulterant Badge
         adulterantVerdictBadge.textContent = adulterant;
-        adulterantVerdictBadge.className = 'adulterant-pill-badge';
+        adulterantVerdictBadge.className = 'adulterant-tag';
         if (data.severity === 'danger') {
             adulterantVerdictBadge.classList.add('danger');
         } else if (data.severity === 'warning') {
             adulterantVerdictBadge.classList.add('warning');
         }
 
-        // 5. Sensor Checklist
+        // Diagnosis Checklist
         diagnosisChecklist.innerHTML = '';
         warnings.forEach(w => {
             const item = document.createElement('div');
@@ -328,7 +298,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Save Button
     btnSaveTest.addEventListener('click', () => {
         runPrediction(true);
     });
@@ -386,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <span class="sample-name-sub">${escapeHtml(s.notes || 'No notes')}</span>
                         </div>
                     </td>
-                    <td style="font-size: 0.76rem; color: var(--text-secondary);">${escapeHtml(s.timestamp)}</td>
+                    <td style="font-size: 0.76rem; color: var(--text-muted);">${escapeHtml(s.timestamp)}</td>
                     <td>
                         <div class="sensor-chips-group">
                             <span class="mini-chip" title="Temperature">🌡️ ${s.temperature.toFixed(1)}°C</span>
@@ -403,24 +372,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         </span>
                     </td>
                     <td>
-                        <div style="font-family: var(--font-mono); font-size: 0.75rem; font-weight: 700;">
+                        <div style="font-family: var(--font-mono); font-size: 0.76rem; font-weight: 700;">
                             ${isMedium ? s.conf_medium : s.conf_low}%
                         </div>
                     </td>
                     <td>
-                        <div style="font-size: 0.78rem; font-weight: 600; color: ${s.severity === 'danger' ? '#fb7185' : (s.severity === 'warning' ? '#fbbf24' : '#34d399')};">
+                        <div style="font-size: 0.78rem; font-weight: 600; color: ${s.severity === 'danger' ? '#b91c1c' : (s.severity === 'warning' ? '#b45309' : '#059669')};">
                             ${escapeHtml(s.adulterant_type)}
                         </div>
                     </td>
                     <td>
-                        <span class="mini-chip" style="background: rgba(56, 189, 248, 0.1); border-color: rgba(56, 189, 248, 0.25); color: #38bdf8;">
+                        <span class="mini-chip" style="background: #f0f9ff; border-color: #bae6fd; color: #0284c7;">
                             ${escapeHtml(s.source)}
                         </span>
                     </td>
                     <td>
                         <div class="table-row-actions">
                             <button class="btn-table-action" data-action="inspect" data-id="${s.id}" title="Inspect full forensic breakdown">🔍</button>
-                            <button class="btn-table-action" data-action="load" data-id="${s.id}" title="Load values into Testing Bench">🧪</button>
+                            <button class="btn-table-action" data-action="load" data-id="${s.id}" title="Load values into form">🧪</button>
                             <button class="btn-table-action delete" data-action="delete" data-id="${s.id}" title="Delete record">🗑️</button>
                         </div>
                     </td>
@@ -438,17 +407,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Filter pills
-    filterPills.forEach(pill => {
-        pill.addEventListener('click', () => {
-            filterPills.forEach(p => p.classList.remove('active'));
-            pill.classList.add('active');
-            currentActiveGradeFilter = pill.getAttribute('data-filter');
+    // Filter Buttons
+    filterButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentActiveGradeFilter = btn.getAttribute('data-filter');
             loadSampleHistory();
         });
     });
 
-    // Search filter
+    // Search Filter
     if (historySearchInput) {
         historySearchInput.addEventListener('input', () => {
             clearTimeout(liveDebounceTimer);
@@ -460,7 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnRefreshHistory.addEventListener('click', () => {
             loadSampleHistory();
             loadHistoryStats();
-            showToast('Refreshed lab history records.');
+            showToast('Refreshed lab records.');
         });
     }
 
@@ -476,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     rowElement.remove();
                     loadHistoryStats();
                 }, 200);
-                showToast(`Deleted Sample #${id} from database.`);
+                showToast(`Deleted Sample #${id}.`);
             }
         } catch (err) {
             console.error('[DELETE ERROR]', err);
@@ -486,7 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Clear History
     if (btnClearHistory) {
         btnClearHistory.addEventListener('click', async () => {
-            if (!confirm('Are you sure you want to delete ALL sample history records? This cannot be undone.')) return;
+            if (!confirm('Are you sure you want to delete ALL sample history records?')) return;
 
             try {
                 const res = await fetch('/api/history/clear', { method: 'POST' });
@@ -501,19 +470,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Load sample back into bench
+    // Load sample back into form
     function loadSampleIntoBench(sample) {
-        sliderTemp.value = sample.temperature;
-        sliderPh.value = sample.ph;
-        sliderColor.value = sample.color;
-        checkFat.checked = sample.fat === 1;
-        checkTurb.checked = sample.turbidity === 1;
+        inputTemp.value = sample.temperature;
+        inputPh.value = sample.ph;
+        inputColor.value = sample.color;
+        selectFat.value = String(sample.fat);
+        selectTurb.value = String(sample.turbidity);
         inputSampleName.value = `${sample.sample_name} (Re-test)`;
-        inputSampleNotes.value = `Loaded from #${sample.id}`;
+        inputSampleNotes.value = `Loaded from Record #${sample.id}`;
 
         switchTab('tab-analyzer');
-        updateBenchUI(true);
-        showToast(`Loaded ${sample.sample_name} into testing bench.`);
+        updateNormalInputsUI(true);
+        showToast(`Loaded ${sample.sample_name} into testing form.`);
     }
 
     // =========================================================================
@@ -525,52 +494,54 @@ document.addEventListener('DOMContentLoaded', () => {
         modalSampleSubtitle.textContent = `Record #${sample.id} • ${sample.timestamp} • ${sample.source}`;
 
         const isMedium = sample.grade.toLowerCase() === 'medium';
-        const gradeBadgeColor = isMedium ? '#f59e0b' : '#f43f5e';
+        const gradeColor = isMedium ? '#b45309' : '#b91c1c';
+        const gradeBg = isMedium ? 'var(--accent-amber-light)' : 'var(--accent-rose-light)';
+        const gradeBorder = isMedium ? 'var(--accent-amber-border)' : 'var(--accent-rose-border)';
 
         modalSampleBody.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:center; padding:1rem; border-radius:12px; background:rgba(255,255,255,0.03); border:1px solid var(--border-subtle);">
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:1.15rem; border-radius:12px; background:${gradeBg}; border:1px solid ${gradeBorder};">
                 <div>
-                    <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Verified AI Quality Grade</div>
-                    <div style="font-family:var(--font-heading); font-size:1.2rem; font-weight:800; color:${gradeBadgeColor};">${sample.grade} QUALITY</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Quality Grade Verdict</div>
+                    <div style="font-family:var(--font-heading); font-size:1.25rem; font-weight:800; color:${gradeColor};">${sample.grade} QUALITY</div>
                 </div>
                 <div style="text-align:right;">
                     <div style="font-size:0.75rem; color:var(--text-muted);">Confidence</div>
-                    <div style="font-family:var(--font-mono); font-size:1.1rem; font-weight:700; color:var(--text-primary);">
+                    <div style="font-family:var(--font-mono); font-size:1.15rem; font-weight:700; color:var(--text-primary);">
                         ${isMedium ? sample.conf_medium : sample.conf_low}%
                     </div>
                 </div>
             </div>
 
             <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:0.75rem;">
-                <div style="background:rgba(10,16,30,0.6); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
+                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
                     <div style="font-size:0.7rem; color:var(--text-muted);">Temperature</div>
-                    <div style="font-family:var(--font-mono); font-size:1rem; font-weight:700; color:#38bdf8;">${sample.temperature}°C</div>
+                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:#0284c7;">${sample.temperature}°C</div>
                 </div>
-                <div style="background:rgba(10,16,30,0.6); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
+                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
                     <div style="font-size:0.7rem; color:var(--text-muted);">pH Acidity</div>
-                    <div style="font-family:var(--font-mono); font-size:1rem; font-weight:700; color:#34d399;">${sample.ph} pH</div>
+                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:#059669;">${sample.ph} pH</div>
                 </div>
-                <div style="background:rgba(10,16,30,0.6); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
+                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
                     <div style="font-size:0.7rem; color:var(--text-muted);">Fat Content</div>
-                    <div style="font-family:var(--font-mono); font-size:1rem; font-weight:700; color:var(--text-primary);">${sample.fat === 1 ? 'Present (1)' : 'Depleted (0)'}</div>
+                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:var(--text-primary);">${sample.fat === 1 ? 'Present (1)' : 'Depleted (0)'}</div>
                 </div>
-                <div style="background:rgba(10,16,30,0.6); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
+                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
                     <div style="font-size:0.7rem; color:var(--text-muted);">Turbidity Opacity</div>
-                    <div style="font-family:var(--font-mono); font-size:1rem; font-weight:700; color:var(--text-primary);">${sample.turbidity === 1 ? 'Normal SNF (1)' : 'Diluted (0)'}</div>
+                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:var(--text-primary);">${sample.turbidity === 1 ? 'Normal SNF (1)' : 'Diluted (0)'}</div>
                 </div>
-                <div style="background:rgba(10,16,30,0.6); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
+                <div style="background:var(--bg-card-subtle); padding:0.85rem; border-radius:8px; border:1px solid var(--border-subtle);">
                     <div style="font-size:0.7rem; color:var(--text-muted);">Optical Color</div>
-                    <div style="font-family:var(--font-mono); font-size:1rem; font-weight:700; color:var(--text-primary);">${sample.color}</div>
+                    <div style="font-family:var(--font-mono); font-size:1.05rem; font-weight:700; color:var(--text-primary);">${sample.color}</div>
                 </div>
             </div>
 
-            <div style="background:rgba(10,16,30,0.6); padding:1rem; border-radius:10px; border:1px solid var(--border-subtle);">
+            <div style="background:var(--bg-card-subtle); padding:1rem; border-radius:10px; border:1px solid var(--border-subtle);">
                 <div style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; font-weight:700; margin-bottom:0.25rem;">Adulterant Classification</div>
-                <div style="font-weight:700; color:${sample.severity === 'danger' ? '#fb7185' : (sample.severity === 'warning' ? '#fbbf24' : '#34d399')}; font-size:0.95rem;">
+                <div style="font-weight:700; color:${sample.severity === 'danger' ? '#b91c1c' : (sample.severity === 'warning' ? '#b45309' : '#059669')}; font-size:0.95rem;">
                     ${sample.adulterant_type}
                 </div>
                 <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.35rem;">
-                    Inspection Notes: ${escapeHtml(sample.notes || 'No additional laboratory observations recorded.')}
+                    Inspection Notes: ${escapeHtml(sample.notes || 'Standard dairy testing observation.')}
                 </div>
             </div>
         `;
@@ -602,13 +573,13 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await fetch('/api/presets');
             const presets = await res.json();
-            presetsModernGrid.innerHTML = '';
+            presetsCleanGrid.innerHTML = '';
 
             presets.forEach(p => {
                 const card = document.createElement('div');
-                card.className = 'preset-modern-card';
+                card.className = 'preset-clean-card';
                 const isMedium = p.expected.toLowerCase().includes('medium');
-                const badgeStyle = isMedium ? 'background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.4); color:#fbbf24;' : 'background:rgba(244,63,94,0.15); border:1px solid rgba(244,63,94,0.4); color:#fb7185;';
+                const badgeStyle = isMedium ? 'background:var(--accent-amber-light); border:1px solid var(--accent-amber-border); color:var(--accent-amber);' : 'background:var(--accent-rose-light); border:1px solid var(--accent-rose-border); color:var(--accent-rose);';
 
                 card.innerHTML = `
                     <div>
@@ -632,20 +603,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 card.querySelector('.preset-btn-test').addEventListener('click', (e) => {
                     e.stopPropagation();
-                    sliderTemp.value = p.values.temperature;
-                    sliderPh.value = p.values.ph;
-                    sliderColor.value = p.values.color;
-                    checkFat.checked = p.values.fat === 1;
-                    checkTurb.checked = p.values.turbidity === 1;
+                    inputTemp.value = p.values.temperature;
+                    inputPh.value = p.values.ph;
+                    inputColor.value = p.values.color;
+                    selectFat.value = String(p.values.fat);
+                    selectTurb.value = String(p.values.turbidity);
                     inputSampleName.value = p.title;
                     inputSampleNotes.value = p.description;
 
                     switchTab('tab-analyzer');
-                    updateBenchUI(true);
+                    updateNormalInputsUI(true);
                     runPrediction(true);
                 });
 
-                presetsModernGrid.appendChild(card);
+                presetsCleanGrid.appendChild(card);
             });
         } catch (err) {
             console.error('[PRESETS ERROR]', err);
@@ -668,7 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 data.stream.slice(0, 15).forEach(row => {
                     const tr = document.createElement('tr');
                     const isMed = row.grade === 'Medium';
-                    const gradeColor = isMed ? '#fbbf24' : '#fb7185';
+                    const gradeColor = isMed ? '#b45309' : '#b91c1c';
                     tr.innerHTML = `
                         <td>${escapeHtml(row.timestamp)}</td>
                         <td><code>${escapeHtml(row.device_id)}</code></td>
@@ -683,7 +654,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     telemetryTableBody.appendChild(tr);
                 });
             } else {
-                esp32Dot.className = 'indicator-dot cyan';
+                esp32Dot.className = 'indicator-dot blue';
                 esp32Text.textContent = 'Listening (:5000)';
             }
         } catch (err) {
@@ -738,7 +709,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         setTimeout(() => {
             toast.style.opacity = '0';
-            toast.style.transform = 'translateY(10px)';
             setTimeout(() => toast.remove(), 250);
         }, 3200);
     }
@@ -756,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // =========================================================================
     // INITIALIZATION
     // =========================================================================
-    updateBenchUI(true);
+    updateNormalInputsUI(true);
     loadHistoryStats();
     loadPresets();
     setInterval(pollLiveTelemetry, 3000);
